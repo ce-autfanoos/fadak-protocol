@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پروتکل فدک | سند آمادگی عملیات</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fadak: {
+                            bg: '#041114',
+                            card: '#081c21',
+                            border: '#11424a',
+                            emerald: '#00ff9d',
+                            glow: '#2ee59d',
+                            red: '#ff3b4e',
+                            muted: '#81a8b0'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Vazirmatn', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+
+    <style>
+        body {
+            background-color: #041114;
+            color: #d6f2ee;
+            font-family: 'Vazirmatn', sans-serif;
+            background-image: 
+                radial-gradient(circle at 50% 6%, rgba(0, 255, 157, 0.14) 0%, transparent 40%),
+                radial-gradient(circle at 90% 75%, rgba(255, 59, 78, 0.07) 0%, transparent 35%),
+                linear-gradient(rgba(4, 17, 20, 0.96), rgba(4, 17, 20, 0.98));
+        }
+
+        .cyber-card {
+            background: rgba(8, 28, 33, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(46, 229, 157, 0.2);
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+        }
+
+        .neon-glow {
+            text-shadow: 0 0 14px rgba(0, 255, 157, 0.6), 0 0 35px rgba(0, 255, 157, 0.2);
+        }
+
+        .laser-accent {
+            position: absolute;
+            height: 1.5px;
+            background: linear-gradient(90deg, transparent, #ff3b4e, transparent);
+            box-shadow: 0 0 8px #ff3b4e;
+            transform: rotate(-30deg);
+            pointer-events: none;
+        }
+
+        /* استایل جایگاه لوگوها (خط چین) */
+        .logo-placeholder {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px dashed rgba(129, 168, 176, 0.4);
+            border-radius: 8px;
+            min-width: 140px;
+            height: 80px;
+            font-size: 0.75rem;
+            color: #81a8b0;
+            background: rgba(0,0,0,0.2);
+            transition: all 0.3s ease;
+        }
+
+        .logo-placeholder:hover {
+            border-color: rgba(46, 229, 157, 0.6);
+            color: #2ee59d;
+        }
+    </style>
+</head>
+<body class="min-h-screen selection:bg-fadak-emerald selection:text-black pb-20">
+
+    <div class="laser-accent w-72 top-20 -left-12 opacity-50"></div>
+    <div class="laser-accent w-96 top-2/3 -right-24 opacity-35"></div>
+
+    <header class="max-w-3xl mx-auto pt-10 pb-8 px-4 text-center relative z-10">
+        <div class="inline-flex flex-col items-center gap-1 px-4 py-2 rounded-2xl bg-fadak-card border border-fadak-border text-fadak-glow text-xs mb-5 shadow-lg">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="w-2 h-2 rounded-full bg-fadak-red animate-pulse"></span>
+                <span class="font-bold text-fadak-red tracking-wider">وضعیت: بحرانی</span>
+            </div>
+            <span>دسترسی به سند حقیقت مختل شد!</span>
+        </div>
+
+        <div class="w-16 h-16 mx-auto rounded-full border border-fadak-glow/50 flex items-center justify-center mb-4 bg-fadak-card shadow-[0_0_20px_rgba(0,255,157,0.15)]">
+            <i class="fa-solid fa-mosque text-2xl text-fadak-emerald"></i>
+        </div>
+
+        <h1 class="text-3xl sm:text-5xl font-black text-white neon-glow tracking-tight mb-3">
+            پروتکل فدک
+        </h1>
+        <p class="text-fadak-glow text-base sm:text-lg font-medium">
+            سند آمادگی، تبیین ابعاد رویداد و محتوای مطالعاتی
+        </p>
+    </header>
+
+    <main class="max-w-3xl mx-auto px-4 space-y-6 relative z-10 leading-relaxed text-sm sm:text-base">
+
+        <!-- پارتیشن ۱ -->
+        <article class="cyber-card rounded-2xl p-6 sm:p-8 border-r-4 border-r-fadak-glow">
+            <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2.5 pb-3 border-b border-fadak-border mb-4">
+                <i class="fa-solid fa-scroll text-fadak-emerald text-base"></i>
+                <span>۱. پیش‌درآمد و مقدمه رویداد</span>
+            </h2>
+            <div class="space-y-4 text-gray-200 text-justify">
+                <p>
+                    شبکه‌ آرشیو مرکزی اسناد اسلامی با یک حمله سایبری گسترده مواجه شده است. یک بدافزار پیشرفته به نام <strong class="text-fadak-red">«انکار» (DENIAL)</strong> به سرورهای اصلی نفوذ کرده و در تلاش است تا سند دست‌نویس خطبه فدکیه را برای همیشه از تاریخ پاک کند. این بدافزار سند را رمزگذاری کرده، بخش‌هایی از استدلال‌های آن را جعل کرده و در حال محو کردن ردپای دیجیتال فدک است.
+                </p>
+                <p class="text-fadak-muted text-sm leading-7">
+                    شما به عنوان تیم واکنش سریع وارد ترمینال امن این شبکه شده‌اید. پیش از ورود به میدان نبرد دیجیتال، لازم است با ابعاد این واقعه، اهمیت سند خطبه و ماهیت تهدیدات آشنا شوید. این سند توجیهی نقشه راه شما برای عبور از ۵ لایه امنیتی و بازسازی کلمه به کلمه حقایق فدک است. آماده‌اید تا کدها را بشکنید؟!
+                </p>
+            </div>
+        </article>
+
+        <!-- پارتیشن ۲ -->
+        <article class="cyber-card rounded-2xl p-6 sm:p-8">
+            <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2.5 pb-3 border-b border-fadak-border mb-4">
+                <i class="fa-solid fa-landmark-dome text-fadak-emerald text-base"></i>
+                <span>۲. زمینه تاریخی و ابعاد موضوعی</span>
+            </h2>
+            <div class="space-y-4 text-gray-200 text-justify">
+                <p>
+                    واقعه فدک، تنها یک اختلاف ملکی ساده نیست؛ بلکه نقطه تلاقی تاریخ، سیاست و معارف الهی است. خطبه فدکیه سخنرانی تاریخی حضرت زهرا (س) در مسجد النبی است که در آن با استناد به آیات قرآن و سنت پیامبر (ص)، حقانیت خود و اهل‌بیت (ع) را اثبات می‌کند. برای موفقیت در این مسابقه، درک عمیق این سه محور ضروری است!
+                </p>
+                
+                <div class="space-y-3 border-r-2 border-fadak-border pr-4 my-4 text-sm text-fadak-muted">
+                    <p><strong class="text-white">محور اول (مالکیت و هبه):</strong> چرا فدک متعلق به حضرت زهرا (س) بود؟ بررسی تاریخ اعطای فدک توسط پیامبر (ص) و استدلال ایشان بر مالکیت.</p>
+                    <p><strong class="text-white">محور دوم (میراث انبیا):</strong> استدلال‌های قرآنی خطبه مانند آیه «و ورث سلیمان داود» و پاسخ به شبهه‌ی عدم ارث بردن انبیا.</p>
+                    <p><strong class="text-white">محور سوم (ولایت و دفاع از حق):</strong> نقش خطبه فدکیه در تبیین جایگاه امامت و ولایت و ضرورت دفاع از حق در برابر انحرافات جامعه اسلامی.</p>
+                </div>
+            </div>
+        </article>
+
+        <!-- پارتیشن ۳ -->
+        <article class="cyber-card rounded-2xl p-6 sm:p-8">
+            <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2.5 pb-3 border-b border-fadak-border mb-4">
+                <i class="fa-solid fa-book-open text-fadak-emerald text-base"></i>
+                <span>۳. گزیده‌ای از فرازهای خطبه مبارکه</span>
+            </h2>
+            
+            <div class="space-y-4">
+                <blockquote class="bg-black/40 border-r-4 border-fadak-emerald p-5 rounded-xl text-gray-100 text-base italic leading-loose shadow-inner">
+                    «أَفْعَلَى عَمْدٍ تَرَكْتُمْ كِتَابَ اللَّهِ وَ نَبَذْتُمُوهُ وَرَاءَ ظُهُورِكُمْ إِذْ يَقُولُ: وَ وَرِتَ سُلَيْمَانُ داود...»
+                    <span class="block text-sm text-fadak-glow mt-4 not-italic font-sans leading-7">
+                        «آیا عمدا کتاب خدا را ترک کردید و آن‌را پشت سر انداختید؟ در حالی که خداوند می‌فرماید و سلیمان از داود ارث برد...»
+                        <br>
+                        <span class="text-fadak-muted text-xs mt-3 block leading-6">
+                            این فراز یکی از قوی‌ترین استدلال‌های قرآنی حضرت زهرا (س) در اثبات حقانیت خود و پاسخ به ادعای خلیفه است.
+                        </span>
+                    </span>
+                </blockquote>
+
+                <p class="text-sm text-fadak-muted text-justify mt-4 leading-7">
+                    در طول مسابقه با رمزگشایی از داده‌های پنهان بخش‌های دیگری از این خطبه را بازیابی خواهید کرد. هر کلمه‌ای که کشف می‌کنید قطعه‌ای از پازل حقیقت است.
+                </p>
+            </div>
+        </article>
+
+        <!-- پارتیشن ۴ -->
+        <article class="cyber-card rounded-2xl p-6 sm:p-8">
+            <h2 class="text-lg sm:text-xl font-bold text-white flex items-center gap-2.5 pb-3 border-b border-fadak-border mb-4">
+                <i class="fa-solid fa-circle-info text-fadak-emerald text-base"></i>
+                <span>۴. نکات مهم و راهنمای عمومی مطالعه</span>
+            </h2>
+
+            <div class="space-y-3 text-sm text-gray-200 text-justify">
+                <p>
+                    برای ورود به مسابقه «پروتکل فدک» و عبور موفقیت‌آمیز از مراحل به نکات زیر دقت کنید؛
+                </p>
+                <ul class="space-y-4 text-fadak-muted list-disc list-inside pr-1 leading-7 mt-2">
+                    <li><strong class="text-white">تجهیزات فنی برای حل چالش‌ها:</strong> به یک کامپیوتر ترجیحا با پایتون نصب شده، دانش پایه‌ای از شبکه و رمزنگاری و نرم‌افزارهایی مانند Wireshark و Audacity نیاز خواهید داشت.</li>
+                    <li><strong class="text-white">دقت در جزئیات:</strong> در این مسابقه هیچ داده‌ای بی‌ارزش نیست. به لاگ‌ها، پکت‌ها کدهای باینری و حتی فایل‌های صوتی با دقت نگاه کنید.</li>
+                    <li><strong class="text-white">زمان‌بندی:</strong> مسابقه در ۵ مرحله پیوسته برگزار می‌شود. پس از ورود به ربات تایمر شما فعال خواهد شد. مدیریت زمان در مراحل حساس، کلید موفقیت است.</li>
+                    <li><strong class="text-white">بستر اجرا:</strong> تمام مراحل از طریق ربات «پیام‌رسان بله» دریافت و ارسال می‌شوند. آماده باشید!</li>
+                </ul>
+            </div>
+        </article>
+
+    </main>
+
+    <!-- فوتر -->
+    <footer class="max-w-3xl mx-auto px-4 mt-12 text-center text-xs text-fadak-muted border-t border-fadak-border/40 pt-8">
+        <p class="font-bold text-white text-xl mb-4 neon-glow">«فَدَكَ حَقَّ لَنَا»</p>
+        
+        <p class="mb-6 text-sm">سند آمادگی و توجیهی «پروتکل فدک» | ایام شهادت حضرت زهرا (س) | فاطمیه ۱۴۴۸</p>
+        
+        <div class="flex flex-col items-center justify-center gap-4 mt-8">
+            <span class="text-fadak-border font-bold">برگزارکنندگان:</span>
+            
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-16 w-full mt-4">
+                
+                <!-- لوگوی پویش -->
+                <div class="flex flex-col items-center gap-3">
+                    <div class="logo-placeholder">
+                        [لوگوی پویش]
+                    </div>
+                    <span class="flex items-center gap-2 text-sm text-gray-300">
+                        <i class="fa-solid fa-shield-halved text-fadak-glow"></i> گروه علمی فرهنگی پویش
+                    </span>
+                </div>
+
+                <!-- لوگوی فانوس -->
+                <div class="flex flex-col items-center gap-3">
+                    <div class="logo-placeholder">
+                        [لوگوی فانوس]
+                    </div>
+                    <span class="flex items-center gap-2 text-sm text-gray-300">
+                        <i class="fa-solid fa-lightbulb text-fadak-glow"></i> گروه علمی فرهنگی فانوس
+                    </span>
+                </div>
+
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>
