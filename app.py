@@ -4,10 +4,11 @@ from flask import Flask, request
 import telebot
 from telebot import types
 from supabase import create_client, Client
-
+import time
 # ==========================================
 # خواندن متغیرهای محیطی از Render
 # ==========================================
+ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
@@ -225,6 +226,65 @@ def handle_contact(message):
         return
     if message.contact and message.contact.phone_number:
         process_phone_submission(message, message.contact.phone_number)
+
+@bot.message_handler(commands=['broadcast'])
+def handle_broadcast(message):
+    # بررسی دسترسی ادمین
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    # جدا کردن متن پیام از دستور /broadcast
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(
+            message,
+            "⚠️ لطفاً متن پیام همگانی را جلوی دستور بنویسید.\n"
+            "مثال:\n"
+            "<code>/broadcast 🚨 عملیات تا ۱۰ دقیقه دیگر آغاز می‌شود!</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    broadcast_text = parts[1]
+    
+    # دریافت لیست تمام کاربران از دیتابیس Supabase
+    res = supabase.table("users").select("user_id").execute()
+    users = res.data if res.data else []
+    
+    if not users:
+        bot.reply_to(message, "هیچ کاربری در دیتابیس ثبت نشده است.")
+        return
+
+    status_msg = bot.reply_to(message, f"⏳ در حال ارسال پیام به {len(users)} کاربر...")
+    
+    success_count = 0
+    fail_count = 0
+    
+    for u in users:
+        uid = u.get("user_id")
+        try:
+            bot.send_message(
+                uid,
+                broadcast_text,
+                parse_mode="HTML",
+                disable_web_page_preview=True
+            )
+            success_count += 1
+            # وقفه کوتاه ۵۰ میلی‌ثانیه‌ای برای جلوگیری از بلاک شدن توسط محدودیت نرخ تلگرام (Flood Limit)
+            time.sleep(0.05)
+        except Exception:
+            # کاربر ربات را بلاک کرده است
+            fail_count += 1
+
+    bot.edit_message_text(
+        f"✅ <b>ارسال همگانی به پایان رسید!</b>\n"
+        f"📤 ارسال موفق: <code>{success_count}</code>\n"
+        f"🚫 ناموفق (بلاک‌شده): <code>{fail_count}</code>",
+        chat_id=message.chat.id,
+        message_id=status_msg.message_id,
+        parse_mode="HTML"
+    )
+
 
 @bot.message_handler(func=lambda m: True)
 def handle_messages(message):
