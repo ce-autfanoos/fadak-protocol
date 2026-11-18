@@ -282,6 +282,61 @@ def handle_broadcast(message):
             fail += 1
     bot.edit_message_text(f"✅ ارسال تمام شد!\nموفق: {ok} | ناموفق: {fail}", message.chat.id, status_msg.message_id)
 
+@bot.message_handler(commands=['broadcast_pdf'])
+def handle_broadcast_pdf(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+
+    # بررسی اینکه ادمین روی یک فایل ریپلای کرده باشد
+    if not message.reply_to_message or not message.reply_to_message.document:
+        bot.reply_to(
+            message,
+            "⚠️ لطفاً ابتدا فایل PDF را داخل چت ربات بفرستید، سپس روی آن <b>Reply</b> کنید و بنویسید:\n"
+            "<code>/broadcast_pdf</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    file_id = message.reply_to_message.document.file_id
+    # اگر متنی جلوی دستور نوشتید به عنوان کپشن می‌رود، وگرنه متن پیش‌فرض ارسال می‌شود
+    parts = message.text.split(maxsplit=1)
+    caption_text = parts[1] if len(parts) > 1 else (
+        "📜 <b>سند حقیقت | راهنمای کامل خطبه فدکیه</b>\n"
+        "این فایل مرجع اصلی شما در طول مراحل عملیات «پروتکل فدک» خواهد بود. آن را ذخیره و مطالعه کنید."
+    )
+
+    res = supabase.table("users").select("user_id").execute()
+    users = res.data if res.data else []
+
+    if not users:
+        bot.reply_to(message, "هیچ کاربری در دیتابیس ثبت نشده است.")
+        return
+
+    status_msg = bot.reply_to(message, f"⏳ در حال ارسال فایل PDF به {len(users)} کاربر...")
+    ok, fail = 0, 0
+
+    for u in users:
+        try:
+            bot.send_document(
+                u.get("user_id"),
+                file_id,
+                caption=caption_text,
+                parse_mode="HTML"
+            )
+            ok += 1
+            time.sleep(0.05)
+        except Exception:
+            fail += 1
+
+    bot.edit_message_text(
+        f"✅ <b>ارسال فایل PDF به پایان رسید!</b>\n"
+        f"📤 ارسال موفق: <code>{ok}</code>\n"
+        f"🚫 ناموفق (بلاک‌شده): <code>{fail}</code>",
+        chat_id=message.chat.id,
+        message_id=status_msg.message_id,
+        parse_mode="HTML"
+    )
+    
 # ==========================================
 # هندلرهای کاربران و مسابقه
 # ==========================================
