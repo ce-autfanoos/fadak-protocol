@@ -7,9 +7,6 @@ import telebot
 from telebot import types
 from supabase import create_client, Client
 
-# ==========================================
-# متغیرهای محیطی Render
-# ==========================================
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
@@ -18,6 +15,8 @@ SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
 COMPETITION_ACTIVE = os.environ.get("COMPETITION_ACTIVE", "false").lower() == "true"
 MAX_UNLOCKED_STAGE = int(os.environ.get("MAX_UNLOCKED_STAGE", "1"))
 ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+
+GUIDE_PDF_FILE_ID = os.environ.get("GUIDE_PDF_FILE_ID", "")
 
 STAGE_FILE_IDS = {
     1: os.environ.get("STAGE1_FILE_ID", ""),
@@ -29,7 +28,7 @@ STAGE_FILE_IDS = {
 
 STAGE_LOCAL_FILES = {
     1: "traffic_log.txt",
-    2: "intercept.pcap",
+    2: "intercept_dump.json",
     3: "encrypted_fadak.txt",
     4: "reactor_sim.py",
     5: "final_message.wav",
@@ -40,11 +39,8 @@ app = Flask(__name__)
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 RATE_LIMIT_MAX = 3
-LOCKOUT_SECONDS = 15  # 15 ثانیه بلاک بعد از 3 جواب غلط متوالی
+LOCKOUT_SECONDS = 15
 
-# ==========================================
-# نرمال‌سازی و هش کردن پاسخ‌ها (SHA-256)
-# ==========================================
 def to_english_digits(text: str) -> str:
     persian = "۰۱۲۳۴۵۶۷۸۹"
     arabic = "٠١٢٣٤٥٦٧٨٩"
@@ -58,7 +54,7 @@ def normalize_answer(text: str) -> str:
     replacements = {
         "ي": "ی", "ك": "ک", "أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه",
         "َ": "", "ِ": "", "ُ": "", "ّ": "", "ْ": "", "ٌ": "", "ٍ": "", "ً": "",
-        " ": "", "_": "", "-": "", "«": "", "»": ""
+        "\u200c": "", " ": "", "_": "", "-": "", "«": "", "»": ""
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -67,18 +63,24 @@ def normalize_answer(text: str) -> str:
 def hash_text(text: str) -> str:
     return hashlib.sha256(normalize_answer(text).encode("utf-8")).hexdigest()
 
-# هش پاسخ‌های صحیح هر 5 مرحله
 VALID_STAGE_HASHES = {
     1: {hash_text("غصب"), hash_text("GHASB")},
-    2: {hash_text("ارث"), hash_text("ERS")},
+    2: {
+        hash_text("ارث فرقه"),
+        hash_text("ارث الفرقه"),
+        hash_text("ارث تفرقه"),
+        hash_text("فرقه ارث"),
+        hash_text("ارث"),
+        hash_text("ERS")
+    },
     3: {hash_text("علی"), hash_text("ALI")},
     4: {hash_text("حق"), hash_text("HAQ")},
     5: {hash_text("فدک حق لنا"), hash_text("FADAKHAQLANA")}
 }
 
-# ==========================================
-# توابع دیتابیس Supabase
-# ==========================================
+AI_TRAP_HASH_STAGE1 = {hash_text("سقیفه"), hash_text("فراموشی"), hash_text("SAQIFEH")}
+AI_TRAP_HASH_STAGE2 = {hash_text("زکات"), hash_text("ZAKAT"), hash_text("شهادت محمد"), hash_text("ولایت"), hash_text("خلافت")}
+
 def normalize_phone(phone: str) -> str:
     phone = to_english_digits(phone)
     phone = re.sub(r"[^\d+]", "", phone)
@@ -112,9 +114,6 @@ def is_field_taken(field_name: str, value: str) -> bool:
     res = supabase.table("users").select("user_id").eq(field_name, value).execute()
     return len(res.data) > 0
 
-# ==========================================
-# متون مراحل و کیبوردها
-# ==========================================
 PRE_LAUNCH_TEXT = (
     "🟢 [SYSTEM ONLINE] \n"
     "⚪️ [اتصال امن برقرار شد]\n"
@@ -143,15 +142,27 @@ STAGE_MESSAGES = {
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>کلمه کلیدی اول را پس از کشف، همین‌جا ارسال کنید:</b>"
     ),
-    2: "📡 <b>[LAYER 02/05 : پروتکل ارتباطی]</b>\nدر حال دریافت بسته‌های شبکه...",
+    2: (
+        "📡 <b>[SYSTEM ALERT: DEEP PACKET INSPECTION REQUIRED]</b>\n"
+        "<code>[LAYER 02/05 : پروتکل ارتباطی (Packet Analysis)]</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🕵️‍♂️ <b>گزارش وضعیت:</b>\n"
+        "بدافزار «انکار» برای قطع پیوند میان <b>فلسفه امامت</b> و <b>استدلال قرآنی حضرت زهرا (س)</b>، ترافیک شبکه روی درگاه <code>UDP 1400</code> را آلوده کرده و یک جریان انحرافی (Honeypot) برای فریب ابزارهای خودکار و هوش مصنوعی روی همین پورت ایجاد نموده است!\n\n"
+        "🛠 <b>ماموریت فنی شما:</b>\n"
+        "۱. فایل ضبط ترافیک شبکه (<code>intercept_dump.json</code>) را بررسی کنید.\n"
+        "۲. پیش از رمزگشایی پورت <code>1400</code>، پکت گزارش ممیزی فایروال (<code>ICMP_AUDIT</code> از مبدا <code>10.0.0.1</code>) را در میان پکت‌ها پیدا کنید تا فرمول تشخیص پکت‌های واقعی و کلید رمزگشایی را کشف نمایید.\n"
+        "۳. کلید بازگشایی این لایه، بدون مراجعه دقیق به <b>سند حقیقت (Fadak_Guide.pdf)</b> و تطبیق شماره و محتوای بندها به دست نخواهد آمد!\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⌨️ <b>پس از بازیابی پیام اصلی، کلید خواسته شده را ارسال کنید:</b>"
+    ),
     3: "🔐 <b>[LAYER 03/05 : رمزنگاری کهن]</b>\nدر حال بارگذاری متن رمزنگاری‌شده...",
     4: "🔥 <b>[LAYER 04/05 : شبیه‌سازی واکنش]</b>\nهشدار حرارتی اتاق سرور فعال شد...",
     5: "🎙 <b>[LAYER 05/05 : بازسازی نهایی]</b>\nسیگنال صوتی نهایی دریافت شد..."
 }
 
 ERROR_TEXTS = [
-    "⛔️ <b>[ACCESS DENIED]</b>\nسیستم امنیتی دشمن شما را شناسایی کرد! دسترسی رد شد. (مراقب تله‌های انحرافی داخل لاگ باشید!)",
-    "⚠️ <b>[SIGNATURE MISMATCH]</b>\nکلید واردشده با هشِ سند حقیقت همخوانی ندارد! فقط کلمه کلیدی اصلی را ارسال کنید.",
+    "⛔️ <b>[ACCESS DENIED]</b>\nسیستم امنیتی دشمن شما را شناسایی کرد! دسترسی رد شد. (مراقب تله‌های انحرافی داخل فایل باشید!)",
+    "⚠️ <b>[SIGNATURE MISMATCH]</b>\nکلید واردشده با هشِ سند حقیقت همخوانی ندارد! دستورالعمل داخل فایل را با دقت بررسی کنید.",
     "🚨 <b>[INTRUSION ALERT]</b>\nپاسخ نادرست! فایروال بدافزار «انکار» در حال ردیابی IP ترمینال شماست!"
 ]
 
@@ -193,7 +204,7 @@ def send_stage_to_user(chat_id: int, stage: int):
             f"🔒 <b>[STAGE {stage} LOCKED // لایه {stage} در حال رمزگشایی توسط مرکز]</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"تبریک اپراتور! شما تمام مراحل فعال تا این لحظه را با موفقیت حل کرده‌اید و امتیاز شما ثبت شده است.\n\n"
-            f"⏳ <b>مرحله {stage}</b> به زودی برای تمام تیم‌ها بازگشایی خواهد شد و از طریق همین ربات به شما اطلاع داده می‌شود.",
+            f"⏳ <b>لایه {stage}</b> طبق جدول زمان‌بندی عملیات بازگشایی خواهد شد و از طریق همین ربات به شما اطلاع داده می‌شود.",
             parse_mode="HTML"
         )
         return
@@ -201,7 +212,6 @@ def send_stage_to_user(chat_id: int, stage: int):
     msg_text = STAGE_MESSAGES.get(stage, f"مرحله {stage}")
     bot.send_message(chat_id, msg_text, parse_mode="HTML")
 
-    # ارسال فایل مرحله (ابتدا با file_id تلگرام، اگر نبود از روی دیسک)
     file_id = STAGE_FILE_IDS.get(stage)
     local_path = STAGE_LOCAL_FILES.get(stage)
     
@@ -211,9 +221,13 @@ def send_stage_to_user(chat_id: int, stage: int):
         with open(local_path, "rb") as f:
             bot.send_document(chat_id, f, caption=f"📁 فایل عملیاتی لایه {stage}")
 
-# ==========================================
-# مسیرهای Flask
-# ==========================================
+    if stage == 1:
+        if GUIDE_PDF_FILE_ID:
+            bot.send_document(chat_id, GUIDE_PDF_FILE_ID, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)")
+        elif os.path.exists("Fadak_Guide.pdf"):
+            with open("Fadak_Guide.pdf", "rb") as pdf_file:
+                bot.send_document(chat_id, pdf_file, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)")
+
 @app.route("/")
 @app.route("/ping")
 def ping():
@@ -239,9 +253,6 @@ def set_webhook():
     bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/webhook/{BOT_TOKEN}")
     return "✅ Webhook successfully connected!", 200
 
-# ==========================================
-# دستورات ادمین (گرفتن file_id و پیام همگانی)
-# ==========================================
 @bot.message_handler(content_types=['document', 'audio', 'voice'], func=lambda m: m.from_user.id in ADMIN_IDS)
 def admin_get_file_id(message):
     fid = None
@@ -255,8 +266,7 @@ def admin_get_file_id(message):
         bot.reply_to(
             message,
             f"📎 <b>File Name:</b> <code>{fname}</code>\n"
-            f"🔑 <b>TELEGRAM FILE_ID:</b>\n<code>{fid}</code>\n\n"
-            "می‌توانید این کد را در Render در متغیر STAGE1_FILE_ID قرار دهید.",
+            f"🔑 <b>TELEGRAM FILE_ID:</b>\n<code>{fid}</code>",
             parse_mode="HTML"
         )
 
@@ -286,60 +296,32 @@ def handle_broadcast(message):
 def handle_broadcast_pdf(message):
     if message.from_user.id not in ADMIN_IDS:
         return
-
-    # بررسی اینکه ادمین روی یک فایل ریپلای کرده باشد
     if not message.reply_to_message or not message.reply_to_message.document:
         bot.reply_to(
             message,
-            "⚠️ لطفاً ابتدا فایل PDF را داخل چت ربات بفرستید، سپس روی آن <b>Reply</b> کنید و بنویسید:\n"
-            "<code>/broadcast_pdf</code>",
+            "⚠️ لطفاً ابتدا فایل را بفرستید، سپس روی آن Reply کنید و بنویسید:\n<code>/broadcast_pdf</code>",
             parse_mode="HTML"
         )
         return
-
     file_id = message.reply_to_message.document.file_id
-    # اگر متنی جلوی دستور نوشتید به عنوان کپشن می‌رود، وگرنه متن پیش‌فرض ارسال می‌شود
     parts = message.text.split(maxsplit=1)
     caption_text = parts[1] if len(parts) > 1 else (
         "📜 <b>سند حقیقت | راهنمای کامل خطبه فدکیه</b>\n"
         "این فایل مرجع اصلی شما در طول مراحل عملیات «پروتکل فدک» خواهد بود. آن را ذخیره و مطالعه کنید."
     )
-
     res = supabase.table("users").select("user_id").execute()
     users = res.data if res.data else []
-
-    if not users:
-        bot.reply_to(message, "هیچ کاربری در دیتابیس ثبت نشده است.")
-        return
-
-    status_msg = bot.reply_to(message, f"⏳ در حال ارسال فایل PDF به {len(users)} کاربر...")
+    status_msg = bot.reply_to(message, f"⏳ در حال ارسال فایل به {len(users)} کاربر...")
     ok, fail = 0, 0
-
     for u in users:
         try:
-            bot.send_document(
-                u.get("user_id"),
-                file_id,
-                caption=caption_text,
-                parse_mode="HTML"
-            )
+            bot.send_document(u.get("user_id"), file_id, caption=caption_text, parse_mode="HTML")
             ok += 1
             time.sleep(0.05)
         except Exception:
             fail += 1
+    bot.edit_message_text(f"✅ ارسال فایل تمام شد!\nموفق: {ok} | ناموفق: {fail}", message.chat.id, status_msg.message_id)
 
-    bot.edit_message_text(
-        f"✅ <b>ارسال فایل PDF به پایان رسید!</b>\n"
-        f"📤 ارسال موفق: <code>{ok}</code>\n"
-        f"🚫 ناموفق (بلاک‌شده): <code>{fail}</code>",
-        chat_id=message.chat.id,
-        message_id=status_msg.message_id,
-        parse_mode="HTML"
-    )
-    
-# ==========================================
-# هندلرهای کاربران و مسابقه
-# ==========================================
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user_id = message.from_user.id
@@ -455,7 +437,6 @@ def handle_messages(message):
         process_phone_submission(message, text)
         return
 
-    # دکمه‌های منوی اصلی
     if text == "🏆 جدول رده‌بندی":
         show_leaderboard(message.chat.id)
         return
@@ -475,7 +456,6 @@ def handle_messages(message):
         send_stage_to_user(message.chat.id, user.get("current_stage", 1))
         return
 
-    # اگر مسابقه هنوز فعال نیست یا مرحله قفل است
     if not COMPETITION_ACTIVE:
         bot.send_message(message.chat.id, "⏳ عملیات هنوز آغاز نشده است!")
         return
@@ -496,10 +476,32 @@ def handle_messages(message):
         )
         return
 
-    # بررسی هش پاسخ ارسالی کاربر
     ans_hash = hash_text(text)
+
+    if stage == 1 and ans_hash in AI_TRAP_HASH_STAGE1:
+        fails = int(user.get("fail_count") or 0) + 1
+        update_user(user_id, fail_count=fails)
+        bot.send_message(
+            message.chat.id,
+            "🤖 <b>[HONEYPOT TRIGGERED // تله هوش مصنوعی فعال شد!]</b>\n"
+            "اپراتور گرامی! کلمه‌ای که وارد کردید مربوط به خط انحرافی (FAKE_AI_TRAP) داخل لاگ است که برای فریب دادن هوش مصنوعی طراحی شده بود! لطفاً فقط خطوط دارای <code>STATUS:VALID</code> را بررسی کنید. (-۵ امتیاز جریمه)",
+            parse_mode="HTML"
+        )
+        return
+
+    if stage == 2 and ans_hash in AI_TRAP_HASH_STAGE2:
+        fails = int(user.get("fail_count") or 0) + 1
+        update_user(user_id, fail_count=fails)
+        bot.send_message(
+            message.chat.id,
+            "🤖 <b>[HONEYPOT TRIGGERED // تله هوش مصنوعی فعال شد!]</b>\n"
+            "اپراتور گرامی! کلمه «زکات» مربوط به جریان فریبنده‌ای (ttl=64) است که برای به اشتباه انداختن هوش مصنوعی طراحی شده بود!\n"
+            "لطفاً ابتدا پکت <code>ICMP_AUDIT</code> را در فایل پیدا کنید و خودتان با کمک «سند حقیقت» جریان اصلی را رمزگشایی نمایید! (-۵ امتیاز جریمه)",
+            parse_mode="HTML"
+        )
+        return
+
     if ans_hash in VALID_STAGE_HASHES.get(stage, set()):
-        # محاسبه امتیاز (۱۰۰ امتیاز پایه ضربدر شماره مرحله منهای جریمه خطاها)
         fails = int(user.get("fail_count") or 0)
         earned = max(50, (stage * 100) - (fails * 5))
         new_score = int(user.get("score") or 0) + earned
@@ -520,6 +522,14 @@ def handle_messages(message):
                 f"🟢 <b>[ACCESS GRANTED]</b>\n"
                 f"کلید اول شناسایی شد: <b>«غَصْب»</b> (+{earned} امتیاز)\n"
                 "در حال باز کردن فایل ترافیک شبکه...",
+                parse_mode="HTML"
+            )
+        elif stage == 2:
+            bot.send_message(
+                message.chat.id,
+                f"🟢 <b>[ACCESS GRANTED]</b>\n"
+                f"زنجیره ارتباطی بازیابی شد! پیوند میان <b>«امامت (امان از فرقه)»</b> و مطالبه <b>«إرْث»</b> در سند حقیقت تثبیت گردید. (+{earned} امتیاز)\n"
+                "در حال انتقال به لایه سوم...",
                 parse_mode="HTML"
             )
         else:
