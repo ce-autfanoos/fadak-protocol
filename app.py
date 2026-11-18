@@ -133,7 +133,7 @@ STAGE_MESSAGES = {
         "⚠️ <b>[SYSTEM ALERT: MASSIVE LOG SPOOFING DETECTED]</b>\n"
         "<code>[LAYER 01/05 : شکار هویت (Data Mining)]</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📡 <b>وضعیت:</b> بدافزار «انکار» (DENIAL) برای پنهان کردن ردپای نفوذ خود به بند اول <b>سند حقیقت (خطبه فدکیه)</b>، فایل لاگ سرور را پر از داده‌های انحرافی و تله‌های هوش مصنوعی کرده است!\n\n"
+        "📡 <b>وضعیت:</b> بدافزار «انکار» (DENIAL) برای پنهان کردن ردپای نفوذ خود به بند اول <b>سند حقیقت (خطبه فدکیه)</b>[cite: 1], فایل لاگ سرور را پر از داده‌های انحرافی و تله‌های هوش مصنوعی کرده است!\n\n"
         "🛠 <b>ماموریت شما:</b>\n"
         "۱. فایل <code>traffic_log.txt</code> پیوست‌شده را بررسی کنید.\n"
         "۲. در میان صدها خط گزارش، خطوطی را پیدا کنید که هم‌زمان دارای تگ <code>[FADAK-ROOT]</code> و وضعیت معتبر <code>[STATUS:VALID]</code> هستند (مراقب خطوط <code>CORRUPTED</code> و تله‌های <code>FAKE_AI_TRAP</code> باشید!).\n"
@@ -147,11 +147,11 @@ STAGE_MESSAGES = {
         "<code>[LAYER 02/05 : پروتکل ارتباطی (Packet Analysis)]</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🕵️‍♂️ <b>گزارش وضعیت:</b>\n"
-        "بدافزار «انکار» برای قطع پیوند میان <b>فلسفه امامت</b> و <b>استدلال قرآنی حضرت زهرا (س)</b>، ترافیک شبکه روی درگاه <code>UDP 1400</code> را آلوده کرده و یک جریان انحرافی (Honeypot) برای فریب ابزارهای خودکار و هوش مصنوعی روی همین پورت ایجاد نموده است!\n\n"
+        "بدافزار «انکار» برای قطع پیوند میان <b>فلسفه امامت</b> و <b>استدلال قرآنی حضرت زهرا (س)</b>[cite: 5, 6], ترافیک شبکه روی درگاه <code>UDP 1400</code> را آلوده کرده و یک جریان انحرافی (Honeypot) برای فریب ابزارهای خودکار و هوش مصنوعی روی همین پورت ایجاد نموده است!\n\n"
         "🛠 <b>ماموریت فنی شما:</b>\n"
         "۱. فایل ضبط ترافیک شبکه (<code>intercept_dump.json</code>) را بررسی کنید.\n"
         "۲. پیش از رمزگشایی پورت <code>1400</code>، پکت گزارش ممیزی فایروال (<code>ICMP_AUDIT</code> از مبدا <code>10.0.0.1</code>) را در میان پکت‌ها پیدا کنید تا فرمول تشخیص پکت‌های واقعی و کلید رمزگشایی را کشف نمایید.\n"
-        "۳. کلید بازگشایی این لایه، بدون مراجعه دقیق به <b>سند حقیقت (Fadak_Guide.pdf)</b> و تطبیق شماره و محتوای بندها به دست نخواهد آمد!\n"
+        "۳. کلید بازگشایی این لایه، بدون مراجعه دقیق به <b>سند حقیقت (Fadak_Guide.pdf)</b>[cite: 1] و تطبیق شماره و محتوای بندها به دست نخواهد آمد[cite: 5, 6]!\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>پس از بازیابی پیام اصلی، کلید خواسته شده را ارسال کنید:</b>"
     ),
@@ -221,12 +221,12 @@ def send_stage_to_user(chat_id: int, stage: int):
         with open(local_path, "rb") as f:
             bot.send_document(chat_id, f, caption=f"📁 فایل عملیاتی لایه {stage}")
 
-    if stage == 1:
-        if GUIDE_PDF_FILE_ID:
-            bot.send_document(chat_id, GUIDE_PDF_FILE_ID, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)")
-        elif os.path.exists("Fadak_Guide.pdf"):
-            with open("Fadak_Guide.pdf", "rb") as pdf_file:
-                bot.send_document(chat_id, pdf_file, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)")
+    # ارسال فایل راهنمای خطبه (Fadak_Guide.pdf) در تمامی مراحل فعال برای دسترسی دائمی شرکت‌کننده
+    if GUIDE_PDF_FILE_ID:
+        bot.send_document(chat_id, GUIDE_PDF_FILE_ID, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)[cite: 1]")
+    elif os.path.exists("Fadak_Guide.pdf"):
+        with open("Fadak_Guide.pdf", "rb") as pdf_file:
+            bot.send_document(chat_id, pdf_file, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)[cite: 1]")
 
 @app.route("/")
 @app.route("/ping")
@@ -247,11 +247,17 @@ def telegram_webhook():
 
 @app.route("/set_webhook")
 def set_webhook():
-    if not WEBHOOK_URL:
-        return "WEBHOOK_URL env variable is not set!", 400
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{WEBHOOK_URL.rstrip('/')}/webhook/{BOT_TOKEN}")
-    return "✅ Webhook successfully connected!", 200
+    if not WEBHOOK_URL or not BOT_TOKEN:
+        return "WEBHOOK_URL or BOT_TOKEN env variable is not set!", 400
+    try:
+        target_url = f"{WEBHOOK_URL.rstrip('/')}/webhook/{BOT_TOKEN}"
+        info = bot.get_webhook_info()
+        if info.url == target_url:
+            return f"✅ Webhook is ALREADY active and connected to: {target_url}", 200
+        bot.set_webhook(url=target_url)
+        return f"✅ Webhook successfully connected to: {target_url}", 200
+    except Exception as e:
+        return f"⚠️ Telegram API temporary error (try refreshing in 10s): {str(e)}", 502
 
 @bot.message_handler(content_types=['document', 'audio', 'voice'], func=lambda m: m.from_user.id in ADMIN_IDS)
 def admin_get_file_id(message):
@@ -306,7 +312,7 @@ def handle_broadcast_pdf(message):
     file_id = message.reply_to_message.document.file_id
     parts = message.text.split(maxsplit=1)
     caption_text = parts[1] if len(parts) > 1 else (
-        "📜 <b>سند حقیقت | راهنمای کامل خطبه فدکیه</b>\n"
+        "📜 <b>سند حقیقت | راهنمای کامل خطبه فدکیه</b>[cite: 1]\n"
         "این فایل مرجع اصلی شما در طول مراحل عملیات «پروتکل فدک» خواهد بود. آن را ذخیره و مطالعه کنید."
     )
     res = supabase.table("users").select("user_id").execute()
