@@ -1,38 +1,85 @@
 import os
 import re
+import time
+import hashlib
 from flask import Flask, request
 import telebot
 from telebot import types
 from supabase import create_client, Client
-import time
+
 # ==========================================
-# خواندن متغیرهای محیطی از Render
+# متغیرهای محیطی Render
 # ==========================================
-ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "")
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY", "")
+
 COMPETITION_ACTIVE = os.environ.get("COMPETITION_ACTIVE", "false").lower() == "true"
+MAX_UNLOCKED_STAGE = int(os.environ.get("MAX_UNLOCKED_STAGE", "1"))
+ADMIN_IDS = [int(x.strip()) for x in os.environ.get("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
+
+STAGE_FILE_IDS = {
+    1: os.environ.get("STAGE1_FILE_ID", ""),
+    2: os.environ.get("STAGE2_FILE_ID", ""),
+    3: os.environ.get("STAGE3_FILE_ID", ""),
+    4: os.environ.get("STAGE4_FILE_ID", ""),
+    5: os.environ.get("STAGE5_FILE_ID", ""),
+}
+
+STAGE_LOCAL_FILES = {
+    1: "traffic_log.txt",
+    2: "intercept.pcap",
+    3: "encrypted_fadak.txt",
+    4: "reactor_sim.py",
+    5: "final_message.wav",
+}
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
-
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
+RATE_LIMIT_MAX = 3
+LOCKOUT_SECONDS = 15  # 15 ثانیه بلاک بعد از 3 جواب غلط متوالی
+
 # ==========================================
-# توابع کمکی و دیتابیس
+# نرمال‌سازی و هش کردن پاسخ‌ها (SHA-256)
 # ==========================================
 def to_english_digits(text: str) -> str:
     persian = "۰۱۲۳۴۵۶۷۸۹"
     arabic = "٠١٢٣٤٥٦٧٨٩"
     english = "0123456789"
-    trans_p = str.maketrans(persian, english)
-    trans_a = str.maketrans(arabic, english)
-    return text.translate(trans_p).translate(trans_a).strip()
+    return text.translate(str.maketrans(persian, english)).translate(str.maketrans(arabic, english)).strip()
 
+def normalize_answer(text: str) -> str:
+    if not text:
+        return ""
+    text = to_english_digits(text).upper()
+    replacements = {
+        "ي": "ی", "ك": "ک", "أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه",
+        "َ": "", "ِ": "", "ُ": "", "ّ": "", "ْ": "", "ٌ": "", "ٍ": "", "ً": "",
+        " ": "", "_": "", "-": "", "«": "", "»": ""
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text
+
+def hash_text(text: str) -> str:
+    return hashlib.sha256(normalize_answer(text).encode("utf-8")).hexdigest()
+
+# هش پاسخ‌های صحیح هر 5 مرحله
+VALID_STAGE_HASHES = {
+    1: {hash_text("غصب"), hash_text("GHASB")},
+    2: {hash_text("ارث"), hash_text("ERS")},
+    3: {hash_text("علی"), hash_text("ALI")},
+    4: {hash_text("حق"), hash_text("HAQ")},
+    5: {hash_text("فدک حق لنا"), hash_text("FADAKHAQLANA")}
+}
+
+# ==========================================
+# توابع دیتابیس Supabase
+# ==========================================
 def normalize_phone(phone: str) -> str:
-    """استانداردسازی شماره موبایل به فرمت 09xxxxxxxxx"""
     phone = to_english_digits(phone)
     phone = re.sub(r"[^\d+]", "", phone)
     if phone.startswith("+98"):
@@ -66,7 +113,7 @@ def is_field_taken(field_name: str, value: str) -> bool:
     return len(res.data) > 0
 
 # ==========================================
-# کیبوردها و پیام‌ها
+# متون مراحل و کیبوردها
 # ==========================================
 PRE_LAUNCH_TEXT = (
     "🟢 [SYSTEM ONLINE] \n"
@@ -82,22 +129,90 @@ PRE_LAUNCH_TEXT = (
     "<a href='https://t.me/pooyesh_aut'>پویش</a>"
 )
 
+STAGE_MESSAGES = {
+    1: (
+        "⚠️ <b>[SYSTEM ALERT: MASSIVE LOG SPOOFING DETECTED]</b>\n"
+        "<code>[LAYER 01/05 : شکار هویت (Data Mining)]</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>وضعیت:</b> بدافزار «انکار» (DENIAL) برای پنهان کردن ردپای نفوذ خود به بند اول <b>سند حقیقت (خطبه فدکیه)</b>، فایل لاگ سرور را پر از داده‌های انحرافی و تله‌های هوش مصنوعی کرده است!\n\n"
+        "🛠 <b>ماموریت شما:</b>\n"
+        "۱. فایل <code>traffic_log.txt</code> پیوست‌شده را بررسی کنید.\n"
+        "۲. در میان صدها خط گزارش، خطوطی را پیدا کنید که هم‌زمان دارای تگ <code>[FADAK-ROOT]</code> و وضعیت معتبر <code>[STATUS:VALID]</code> هستند (مراقب خطوط <code>CORRUPTED</code> و تله‌های <code>FAKE_AI_TRAP</code> باشید!).\n"
+        "۳. سه تکه داده هگز (<code>PART:1/3</code> تا <code>3/3</code>) را به هم بچسبانید و از فرمت Hex به متن UTF-8 تبدیل کنید.\n\n"
+        "🕯 <i>«آنگاه که تصمیم بر منع حق گرفتند، نخستین زخم بر پیکر عدالت چه نام داشت؟ (رجوع به بند اول راهنمای خطبه: FA-001)»</i>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⌨️ <b>کلمه کلیدی اول را پس از کشف، همین‌جا ارسال کنید:</b>"
+    ),
+    2: "📡 <b>[LAYER 02/05 : پروتکل ارتباطی]</b>\nدر حال دریافت بسته‌های شبکه...",
+    3: "🔐 <b>[LAYER 03/05 : رمزنگاری کهن]</b>\nدر حال بارگذاری متن رمزنگاری‌شده...",
+    4: "🔥 <b>[LAYER 04/05 : شبیه‌سازی واکنش]</b>\nهشدار حرارتی اتاق سرور فعال شد...",
+    5: "🎙 <b>[LAYER 05/05 : بازسازی نهایی]</b>\nسیگنال صوتی نهایی دریافت شد..."
+}
+
+ERROR_TEXTS = [
+    "⛔️ <b>[ACCESS DENIED]</b>\nسیستم امنیتی دشمن شما را شناسایی کرد! دسترسی رد شد. (مراقب تله‌های انحرافی داخل لاگ باشید!)",
+    "⚠️ <b>[SIGNATURE MISMATCH]</b>\nکلید واردشده با هشِ سند حقیقت همخوانی ندارد! فقط کلمه کلیدی اصلی را ارسال کنید.",
+    "🚨 <b>[INTRUSION ALERT]</b>\nپاسخ نادرست! فایروال بدافزار «انکار» در حال ردیابی IP ترمینال شماست!"
+]
+
 def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
-        types.KeyboardButton("🚀 ورود به عملیات (شروع مسابقه)"),
-        types.KeyboardButton("👤 مشخصات من")
+        types.KeyboardButton("🚀 ورود به عملیات / دریافت سوال فعلی"),
+        types.KeyboardButton("🏆 جدول رده‌بندی"),
+        types.KeyboardButton("👤 مشخصات و امتیاز من")
     )
     return markup
 
 def get_phone_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    btn = types.KeyboardButton("📱 اشتراک‌گذاری سریع شماره تماس", request_contact=True)
-    markup.add(btn)
+    markup.add(types.KeyboardButton("📱 اشتراک‌گذاری سریع شماره تماس", request_contact=True))
     return markup
 
+def send_stage_to_user(chat_id: int, stage: int):
+    if not COMPETITION_ACTIVE:
+        bot.send_message(
+            chat_id,
+            "⏳ <b>[TERMINAL LOCKED]</b>\n"
+            "عملیات هنوز به صورت رسمی آغاز نشده است! به محض باز شدن لایه اول، از طریق همین ربات اطلاع‌رسانی خواهد شد.",
+            parse_mode="HTML"
+        )
+        return
+
+    if stage > 5:
+        bot.send_message(
+            chat_id,
+            "🌟 <b>[SYSTEM RESTORED]</b>\nشما هر ۵ لایه امنیتی «پروتکل فدک» را با موفقیت به پایان رسانده‌اید!",
+            parse_mode="HTML"
+        )
+        return
+
+    if stage > MAX_UNLOCKED_STAGE:
+        bot.send_message(
+            chat_id,
+            f"🔒 <b>[STAGE {stage} LOCKED // لایه {stage} در حال رمزگشایی توسط مرکز]</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"تبریک اپراتور! شما تمام مراحل فعال تا این لحظه را با موفقیت حل کرده‌اید و امتیاز شما ثبت شده است.\n\n"
+            f"⏳ <b>مرحله {stage}</b> به زودی برای تمام تیم‌ها بازگشایی خواهد شد و از طریق همین ربات به شما اطلاع داده می‌شود.",
+            parse_mode="HTML"
+        )
+        return
+
+    msg_text = STAGE_MESSAGES.get(stage, f"مرحله {stage}")
+    bot.send_message(chat_id, msg_text, parse_mode="HTML")
+
+    # ارسال فایل مرحله (ابتدا با file_id تلگرام، اگر نبود از روی دیسک)
+    file_id = STAGE_FILE_IDS.get(stage)
+    local_path = STAGE_LOCAL_FILES.get(stage)
+    
+    if file_id:
+        bot.send_document(chat_id, file_id, caption=f"📁 فایل عملیاتی لایه {stage}")
+    elif local_path and os.path.exists(local_path):
+        with open(local_path, "rb") as f:
+            bot.send_document(chat_id, f, caption=f"📁 فایل عملیاتی لایه {stage}")
+
 # ==========================================
-# مسیرهای وب‌سرور Flask
+# مسیرهای Flask
 # ==========================================
 @app.route("/")
 @app.route("/ping")
@@ -125,19 +240,56 @@ def set_webhook():
     return "✅ Webhook successfully connected!", 200
 
 # ==========================================
-# هندلرهای تلگرام (ثبت‌نام ۳ مرحله‌ای)
+# دستورات ادمین (گرفتن file_id و پیام همگانی)
+# ==========================================
+@bot.message_handler(content_types=['document', 'audio', 'voice'], func=lambda m: m.from_user.id in ADMIN_IDS)
+def admin_get_file_id(message):
+    fid = None
+    fname = "file"
+    if message.document:
+        fid = message.document.file_id
+        fname = message.document.file_name
+    elif message.audio:
+        fid = message.audio.file_id
+    if fid:
+        bot.reply_to(
+            message,
+            f"📎 <b>File Name:</b> <code>{fname}</code>\n"
+            f"🔑 <b>TELEGRAM FILE_ID:</b>\n<code>{fid}</code>\n\n"
+            "می‌توانید این کد را در Render در متغیر STAGE1_FILE_ID قرار دهید.",
+            parse_mode="HTML"
+        )
+
+@bot.message_handler(commands=['broadcast'])
+def handle_broadcast(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, "⚠️ متن پیام را جلوی `/broadcast` بنویسید.")
+        return
+    broadcast_text = parts[1]
+    res = supabase.table("users").select("user_id").execute()
+    users = res.data if res.data else []
+    status_msg = bot.reply_to(message, f"⏳ در حال ارسال به {len(users)} نفر...")
+    ok, fail = 0, 0
+    for u in users:
+        try:
+            bot.send_message(u.get("user_id"), broadcast_text, parse_mode="HTML", disable_web_page_preview=True)
+            ok += 1
+            time.sleep(0.05)
+        except Exception:
+            fail += 1
+    bot.edit_message_text(f"✅ ارسال تمام شد!\nموفق: {ok} | ناموفق: {fail}", message.chat.id, status_msg.message_id)
+
+# ==========================================
+# هندلرهای کاربران و مسابقه
 # ==========================================
 @bot.message_handler(commands=['start'])
 def handle_start(message):
     user_id = message.from_user.id
     username = message.from_user.username
-    
-    bot.send_message(
-        message.chat.id,
-        PRE_LAUNCH_TEXT,
-        parse_mode="HTML",
-        disable_web_page_preview=True
-    )
+    bot.send_message(message.chat.id, PRE_LAUNCH_TEXT, parse_mode="HTML", disable_web_page_preview=True)
     
     user = get_user(user_id)
     if not user:
@@ -145,41 +297,27 @@ def handle_start(message):
         bot.send_message(
             message.chat.id,
             "🔐 <b>[احراز هویت اپراتور - گام ۱ از ۳]</b>\n"
-            "برای ثبت در سیستم واکنش سریع و اهدای جوایز، لطفاً <b>نام و نام خانوادگی</b> کامل خود را به فارسی ارسال کنید:",
+            "لطفاً <b>نام و نام خانوادگی</b> کامل خود را به فارسی ارسال کنید:",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
-    elif user.get("reg_step") == "WAIT_NAME":
-        bot.send_message(
-            message.chat.id,
-            "🔐 <b>[گام ۱ از ۳]</b> لطفاً <b>نام و نام خانوادگی</b> کامل خود را ارسال کنید:",
-            parse_mode="HTML",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    elif user.get("reg_step") == "WAIT_STUDENT_ID":
-        bot.send_message(
-            message.chat.id,
-            "🎓 <b>[گام ۲ از ۳]</b> لطفاً <b>شماره دانشجویی</b> خود را وارد کنید:",
-            parse_mode="HTML",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
-    elif user.get("reg_step") == "WAIT_PHONE":
-        bot.send_message(
-            message.chat.id,
-            "📞 <b>[گام ۳ از ۳]</b> لطفاً <b>شماره موبایل</b> خود را (جهت هماهنگی اهدای جوایز) تایپ کنید یا روی دکمه زیر بزنید:",
-            parse_mode="HTML",
-            reply_markup=get_phone_keyboard()
-        )
+    elif user.get("reg_step") != "COMPLETED":
+        step = user.get("reg_step")
+        if step == "WAIT_NAME":
+            bot.send_message(message.chat.id, "🔐 لطفاً <b>نام و نام خانوادگی</b> خود را وارد کنید:", parse_mode="HTML")
+        elif step == "WAIT_STUDENT_ID":
+            bot.send_message(message.chat.id, "🎓 لطفاً <b>شماره دانشجویی</b> خود را وارد کنید:", parse_mode="HTML")
+        elif step == "WAIT_PHONE":
+            bot.send_message(message.chat.id, "📞 لطفاً <b>شماره موبایل</b> خود را وارد کنید:", parse_mode="HTML", reply_markup=get_phone_keyboard())
     else:
         bot.send_message(
             message.chat.id,
-            f"✅ <b>اپراتور «{user.get('full_name')}» شناسایی شد.</b>\n"
-            f"🎓 شماره دانشجویی: <code>{user.get('student_id')}</code>\n"
-            f"📞 شماره تماس: <code>{user.get('phone_number')}</code>\n\n"
-            "از منوی زیر می‌توانید وضعیت عملیات را بررسی کنید:",
+            f"✅ <b>اپراتور «{user.get('full_name')}» متصل شد.</b>",
             parse_mode="HTML",
             reply_markup=get_main_menu()
         )
+        if COMPETITION_ACTIVE:
+            send_stage_to_user(message.chat.id, user.get("current_stage", 1))
 
 def process_phone_submission(message, raw_phone: str):
     user_id = message.from_user.id
@@ -187,104 +325,45 @@ def process_phone_submission(message, raw_phone: str):
     phone = normalize_phone(raw_phone)
     
     if not re.match(r"^09\d{9}$", phone):
-        bot.send_message(
-            message.chat.id,
-            "⚠️ شماره موبایل واردشده معتبر نیست! لطفاً شماره را به صورت ۱۱ رقمی (مثلاً <code>09123456789</code>) وارد کنید یا از دکمه پایین صفحه استفاده نمایید:",
-            parse_mode="HTML",
-            reply_markup=get_phone_keyboard()
-        )
+        bot.send_message(message.chat.id, "⚠️ شماره موبایل معتبر نیست! به صورت ۱۱ رقمی (09...) وارد کنید:", reply_markup=get_phone_keyboard())
         return
-        
     if is_field_taken("phone_number", phone):
-        bot.send_message(
-            message.chat.id,
-            "⛔️ <b>[SECURITY ALERT: DUPLICATE PHONE]</b>\n"
-            "این شماره موبایل قبلاً در سیستم ثبت شده است! لطفاً شماره موبایل متعلق به خودتان را وارد کنید:",
-            parse_mode="HTML",
-            reply_markup=get_phone_keyboard()
-        )
+        bot.send_message(message.chat.id, "⛔️ این شماره موبایل قبلاً ثبت شده است!", reply_markup=get_phone_keyboard())
         return
         
     update_user(user_id, phone_number=phone, reg_step="COMPLETED")
     bot.send_message(
         message.chat.id,
         "🟢 <b>[IDENTITY VERIFIED | هویت شما تایید شد]</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 نام اپراتور: <b>{user.get('full_name')}</b>\n"
+        f"👤 اپراتور: <b>{user.get('full_name')}</b>\n"
         f"🎓 شماره دانشجویی: <code>{user.get('student_id')}</code>\n"
-        f"📞 شماره تماس: <code>{phone}</code>\n\n"
-        "ثبت‌نام شما در ترمینال «پروتکل فدک» تکمیل شد. به محض آغاز رسمی مسابقه، از طریق دکمه زیر می‌توانید وارد مرحله اول شوید.",
+        f"📞 شماره تماس: <code>{phone}</code>",
         parse_mode="HTML",
         reply_markup=get_main_menu()
     )
+    if COMPETITION_ACTIVE:
+        send_stage_to_user(message.chat.id, 1)
 
-# هندلر مخصوص زمانی که کاربر روی دکمه «اشتراک‌گذاری سریع شماره تماس» می‌زند
 @bot.message_handler(content_types=['contact'])
 def handle_contact(message):
     user = get_user(message.from_user.id)
-    if not user or user.get("reg_step") != "WAIT_PHONE":
-        return
-    if message.contact and message.contact.phone_number:
+    if user and user.get("reg_step") == "WAIT_PHONE" and message.contact:
         process_phone_submission(message, message.contact.phone_number)
 
-@bot.message_handler(commands=['broadcast'])
-def handle_broadcast(message):
-    # بررسی دسترسی ادمین
-    if message.from_user.id not in ADMIN_IDS:
+def show_leaderboard(chat_id: int):
+    res = supabase.table("users").select("full_name, current_stage, score, finished_at").eq("reg_step", "COMPLETED").order("score", desc=True).limit(10).execute()
+    rows = res.data if res.data else []
+    if not rows:
+        bot.send_message(chat_id, "هنوز امتیازی ثبت نشده است.")
         return
-
-    # جدا کردن متن پیام از دستور /broadcast
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        bot.reply_to(
-            message,
-            "⚠️ لطفاً متن پیام همگانی را جلوی دستور بنویسید.\n"
-            "مثال:\n"
-            "<code>/broadcast 🚨 عملیات تا ۱۰ دقیقه دیگر آغاز می‌شود!</code>",
-            parse_mode="HTML"
-        )
-        return
-
-    broadcast_text = parts[1]
-    
-    # دریافت لیست تمام کاربران از دیتابیس Supabase
-    res = supabase.table("users").select("user_id").execute()
-    users = res.data if res.data else []
-    
-    if not users:
-        bot.reply_to(message, "هیچ کاربری در دیتابیس ثبت نشده است.")
-        return
-
-    status_msg = bot.reply_to(message, f"⏳ در حال ارسال پیام به {len(users)} کاربر...")
-    
-    success_count = 0
-    fail_count = 0
-    
-    for u in users:
-        uid = u.get("user_id")
-        try:
-            bot.send_message(
-                uid,
-                broadcast_text,
-                parse_mode="HTML",
-                disable_web_page_preview=True
-            )
-            success_count += 1
-            # وقفه کوتاه ۵۰ میلی‌ثانیه‌ای برای جلوگیری از بلاک شدن توسط محدودیت نرخ تلگرام (Flood Limit)
-            time.sleep(0.05)
-        except Exception:
-            # کاربر ربات را بلاک کرده است
-            fail_count += 1
-
-    bot.edit_message_text(
-        f"✅ <b>ارسال همگانی به پایان رسید!</b>\n"
-        f"📤 ارسال موفق: <code>{success_count}</code>\n"
-        f"🚫 ناموفق (بلاک‌شده): <code>{fail_count}</code>",
-        chat_id=message.chat.id,
-        message_id=status_msg.message_id,
-        parse_mode="HTML"
-    )
-
+    text = "🏆 <b>جدول رده‌بندی زنده | پروتکل فدک</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+    medals = ["🥇", "🥈", "🥉"]
+    for i, r in enumerate(rows):
+        m = medals[i] if i < 3 else f"<code>#{i+1}</code>"
+        stg = r.get("current_stage", 1)
+        status = "✅ اتمام عملیات" if stg > 5 else f"لایه {stg}"
+        text += f"{m} <b>{r.get('full_name')}</b> — امتیاز: <code>{r.get('score', 0)}</code> ({status})\n"
+    bot.send_message(chat_id, text, parse_mode="HTML")
 
 @bot.message_handler(func=lambda m: True)
 def handle_messages(message):
@@ -297,90 +376,114 @@ def handle_messages(message):
         return
         
     reg_step = user.get("reg_step")
-    
-    # گام ۱: نام و نام خانوادگی
     if reg_step == "WAIT_NAME":
         if len(text) < 4 or text.isdigit():
-            bot.send_message(
-                message.chat.id,
-                "⚠️ نام واردشده معتبر نیست. لطفاً نام و نام خانوادگی واقعی خود را وارد کنید:"
-            )
+            bot.send_message(message.chat.id, "⚠️ لطفاً نام و نام خانوادگی کامل و واقعی خود را وارد کنید:")
             return
-            
         update_user(user_id, full_name=text, reg_step="WAIT_STUDENT_ID")
-        bot.send_message(
-            message.chat.id,
-            f"✅ نام شما (<b>{text}</b>) ثبت شد.\n\n"
-            "🎓 <b>[احراز هویت اپراتور - گام ۲ از ۳]</b>\n"
-            "لطفاً <b>شماره دانشجویی</b> خود را ارسال کنید:\n"
-            "<i>(توجه: هر شماره دانشجویی فقط یک‌بار قابل ثبت است)</i>",
-            parse_mode="HTML"
-        )
+        bot.send_message(message.chat.id, "✅ ثبت شد.\n🎓 <b>[گام ۲ از ۳]</b> لطفاً <b>شماره دانشجویی</b> خود را ارسال کنید:", parse_mode="HTML")
         return
 
-    # گام ۲: شماره دانشجویی
     if reg_step == "WAIT_STUDENT_ID":
         st_id = to_english_digits(text)
-        
         if not st_id.isdigit() or not (6 <= len(st_id) <= 12):
-            bot.send_message(
-                message.chat.id,
-                "⚠️ فرمت شماره دانشجویی نامعتبر است! لطفاً فقط عدد شماره دانشجویی خود را ارسال کنید:"
-            )
+            bot.send_message(message.chat.id, "⚠️ شماره دانشجویی نامعتبر است! فقط عدد وارد کنید:")
             return
-            
         if is_field_taken("student_id", st_id):
-            bot.send_message(
-                message.chat.id,
-                "⛔️ <b>[SECURITY ALERT: DUPLICATE ID]</b>\n"
-                "این شماره دانشجویی قبلاً با یک اکانت دیگر ثبت شده است! لطفاً شماره دانشجویی صحیح خود را وارد کنید:",
-                parse_mode="HTML"
-            )
+            bot.send_message(message.chat.id, "⛔️ این شماره دانشجویی قبلاً ثبت شده است!")
             return
-            
         update_user(user_id, student_id=st_id, reg_step="WAIT_PHONE")
-        bot.send_message(
-            message.chat.id,
-            f"✅ شماره دانشجویی <code>{st_id}</code> ثبت شد.\n\n"
-            "📞 <b>[احراز هویت اپراتور - گام ۳ از ۳]</b>\n"
-            "لطفاً جهت هماهنگی اهدای جوایز، <b>شماره موبایل</b> خود را تایپ کنید (مثلاً <code>09123456789</code>) یا روی دکمه زیر بزنید:",
-            parse_mode="HTML",
-            reply_markup=get_phone_keyboard()
-        )
+        bot.send_message(message.chat.id, "✅ ثبت شد.\n📞 <b>[گام ۳ از ۳]</b> لطفاً <b>شماره موبایل</b> خود را وارد کنید یا دکمه زیر را بزنید:", parse_mode="HTML", reply_markup=get_phone_keyboard())
         return
 
-    # گام ۳: شماره موبایل (اگر کاربر دستی تایپ کرد)
     if reg_step == "WAIT_PHONE":
         process_phone_submission(message, text)
         return
 
-    # منوی اصلی پس از تکمیل ثبت‌نام
-    if text == "👤 مشخصات من":
+    # دکمه‌های منوی اصلی
+    if text == "🏆 جدول رده‌بندی":
+        show_leaderboard(message.chat.id)
+        return
+
+    if text == "👤 مشخصات و امتیاز من":
         bot.send_message(
             message.chat.id,
             f"👤 <b>اپراتور:</b> {user.get('full_name')}\n"
             f"🎓 <b>شماره دانشجویی:</b> <code>{user.get('student_id')}</code>\n"
-            f"📞 <b>شماره تماس:</b> <code>{user.get('phone_number')}</code>\n"
-            f"📍 <b>مرحله فعلی:</b> {user.get('current_stage')} از ۵\n"
-            f"🏆 <b>امتیاز:</b> {user.get('score')}",
+            f"📍 <b>مرحله فعلی:</b> {min(user.get('current_stage', 1), 5)} از ۵\n"
+            f"💎 <b>امتیاز کل:</b> <code>{user.get('score', 0)}</code>",
             parse_mode="HTML"
         )
         return
-        
-    if text == "🚀 ورود به عملیات (شروع مسابقه)":
-        if not COMPETITION_ACTIVE:
+
+    if text == "🚀 ورود به عملیات / دریافت سوال فعلی":
+        send_stage_to_user(message.chat.id, user.get("current_stage", 1))
+        return
+
+    # اگر مسابقه هنوز فعال نیست یا مرحله قفل است
+    if not COMPETITION_ACTIVE:
+        bot.send_message(message.chat.id, "⏳ عملیات هنوز آغاز نشده است!")
+        return
+
+    stage = user.get("current_stage", 1)
+    if stage > 5 or stage > MAX_UNLOCKED_STAGE:
+        send_stage_to_user(message.chat.id, stage)
+        return
+
+    now = time.time()
+    locked_until = float(user.get("locked_until") or 0)
+    if now < locked_until:
+        rem = int(locked_until - now)
+        bot.send_message(
+            message.chat.id,
+            f"🔒 <b>[SECURITY LOCKOUT]</b>\nبه دلیل ۳ تلاش ناموفق، ترمینال شما به مدت <b>{rem} ثانیه</b> دیگر توسط فایروال مسدود است!",
+            parse_mode="HTML"
+        )
+        return
+
+    # بررسی هش پاسخ ارسالی کاربر
+    ans_hash = hash_text(text)
+    if ans_hash in VALID_STAGE_HASHES.get(stage, set()):
+        # محاسبه امتیاز (۱۰۰ امتیاز پایه ضربدر شماره مرحله منهای جریمه خطاها)
+        fails = int(user.get("fail_count") or 0)
+        earned = max(50, (stage * 100) - (fails * 5))
+        new_score = int(user.get("score") or 0) + earned
+        new_stage = stage + 1
+
+        update_user(
+            user_id,
+            current_stage=new_stage,
+            score=new_score,
+            fail_count=0,
+            locked_until=0,
+            finished_at=now
+        )
+
+        if stage == 1:
             bot.send_message(
                 message.chat.id,
-                "⏳ <b>[TERMINAL LOCKED]</b>\n"
-                "عملیات هنوز به صورت رسمی آغاز نشده است! هویت شما در سیستم ثبت شده و به محض باز شدن لایه اول، اطلاع‌رسانی خواهد شد.",
+                f"🟢 <b>[ACCESS GRANTED]</b>\n"
+                f"کلید اول شناسایی شد: <b>«غَصْب»</b> (+{earned} امتیاز)\n"
+                "در حال باز کردن فایل ترافیک شبکه...",
                 parse_mode="HTML"
             )
         else:
+            bot.send_message(message.chat.id, f"🟢 <b>[ACCESS GRANTED]</b>\nلایه {stage} شکسته شد! (+{earned} امتیاز)", parse_mode="HTML")
+
+        send_stage_to_user(message.chat.id, new_stage)
+    else:
+        fails = int(user.get("fail_count") or 0) + 1
+        if fails >= RATE_LIMIT_MAX:
+            update_user(user_id, fail_count=0, locked_until=now + LOCKOUT_SECONDS)
             bot.send_message(
                 message.chat.id,
-                "🟢 ترمینال فعال است! (آماده اتصال به مرحله ۱...)"
+                f"🚨 <b>[INTRUSION DETECTED]</b>\nشما ۳ بار پیاپی پاسخ اشتباه وارد کردید! سیستم امنیتی دشمن شما را به مدت <b>{LOCKOUT_SECONDS} ثانیه</b> مسدود کرد.",
+                parse_mode="HTML"
             )
-        return
+        else:
+            update_user(user_id, fail_count=fails)
+            err = ERROR_TEXTS[fails % len(ERROR_TEXTS)]
+            bot.send_message(message.chat.id, f"{err}\n<i>(خطای {fails} از {RATE_LIMIT_MAX})</i>", parse_mode="HTML")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
