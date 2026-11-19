@@ -2,9 +2,9 @@ import os
 import re
 import time
 import hashlib
-from flask import Flask, request
+from flask import Flask, request, make_response, jsonify
 import telebot
-from telebot import types
+from telebot import types, apihelper
 from supabase import create_client, Client
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
@@ -29,10 +29,15 @@ STAGE_FILE_IDS = {
 STAGE_LOCAL_FILES = {
     1: "traffic_log.txt",
     2: "intercept_dump.json",
-    3: "encrypted_fadak.txt",
+    3: "",
     4: "reactor_sim.py",
     5: "final_message.wav",
 }
+
+apihelper.CONNECT_TIMEOUT = 15
+apihelper.READ_TIMEOUT = 25
+apihelper.RETRY_ON_ERROR = True
+apihelper.MAX_RETRIES = 3
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
@@ -52,9 +57,9 @@ def normalize_answer(text: str) -> str:
         return ""
     text = to_english_digits(text).upper()
     replacements = {
-        "ي": "ی", "ك": "ک", "أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه",
+        "ي": "ی", "ك": "ک", "أ": "ا", "إ": "ا", "آ": "ا", "ة": "ه", "ؤ": "و",
         "َ": "", "ِ": "", "ُ": "", "ّ": "", "ْ": "", "ٌ": "", "ٍ": "", "ً": "",
-        "\u200c": "", " ": "", "_": "", "-": "", "«": "", "»": ""
+        "\u200c": "", " ": "", "_": "", "-": "", "«": "", "»": "", "(": "", ")": ""
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
@@ -73,7 +78,10 @@ VALID_STAGE_HASHES = {
         hash_text("ارث"),
         hash_text("ERS")
     },
-    3: {hash_text("علی"), hash_text("ALI")},
+    3: {
+        hash_text("امیرالمومنین"),
+        hash_text("امیر المومنین")
+    },
     4: {hash_text("حق"), hash_text("HAQ")},
     5: {hash_text("فدک حق لنا"), hash_text("FADAKHAQLANA")}
 }
@@ -114,55 +122,158 @@ def is_field_taken(field_name: str, value: str) -> bool:
     res = supabase.table("users").select("user_id").eq(field_name, value).execute()
     return len(res.data) > 0
 
+LAYER3_HTML = """<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پروتکل فدک | لایه سوم</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #F5F2EB;
+            color: #102A43;
+            font-family: 'Segoe UI', Tahoma, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+        .card {
+            max-width: 580px;
+            width: 100%;
+            border: 2px solid #102A43;
+            background-color: #F5F2EB;
+            padding: 40px 32px;
+            box-shadow: 8px 8px 0px #102A43;
+        }
+        .badge {
+            display: inline-block;
+            background-color: #102A43;
+            color: #F5F2EB;
+            font-size: 0.78rem;
+            letter-spacing: 1px;
+            padding: 6px 12px;
+            margin-bottom: 22px;
+            font-family: monospace;
+        }
+        h1 {
+            font-size: 1.55rem;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }
+        p {
+            font-size: 1rem;
+            line-height: 1.9;
+            opacity: 0.9;
+        }
+        .divider {
+            height: 1px;
+            background-color: #102A43;
+            opacity: 0.2;
+            margin: 28px 0 20px 0;
+        }
+        .footer {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            display: flex;
+            justify-content: space-between;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="badge">ARCHIVE // LAYER 03 // SEALED</div>
+        <h1>تالار ولایت — دسترسی مستقیم مسدود است</h1>
+        <p>
+            آنچه در برابر چشم است، تنها پوسته ای از آرشیو مرکزی است...
+        </p>
+        <div class="divider"></div>
+        <div class="footer">
+            <span>FADAK PROTOCOL</span>
+            <span>403_SEALED</span>
+        </div>
+    </div>
+</body>
+</html>"""
+
+LAYER3_SECRET_TEXT = (
+    "جواب همینجاست!\n\n"
+    "اگر خطبه فدکیه را با دقت بخوانیم، میبینیم دعوا هرگز سر یک باغ و چند نخلستان نبود. "
+    "فدک فقط بهانه ای بود برای دفاع از چیزی بسیار بزرگ تر: اصل ولایت و اطاعت از ولی خدا. "
+    "حضرت زهرا (س) وسط مسجد مدینه، درست پیش از آنکه از حق غصب شده اش حرف بزند، ریشه ماجرا را رو کرد؛ "
+    "گفت اطاعت از ما ستون نظم این امت است و امامت ما تنها سپر در برابر تفرقه و فروپاشی. "
+    "وقتی مردم ولی حق را تنها بگذارند، دیگر نه از عدالت خبری میماند و نه از سنت پیامبر. "
+    "تمام آن خطبه کوبنده و ایستادگی بی نظیر در برابر سکوت سنگین مدینه، برای این بود که حقانیت و جایگاه امام علی علیه السلام زیر غبار فراموشی و تحریف دفن نشو...د."
+)
+
 PRE_LAUNCH_TEXT = (
     "🟢 [SYSTEM ONLINE] \n"
     "⚪️ [اتصال امن برقرار شد]\n"
     ".\n"
     "🔴 به «پروتکل فدک» خوش آمدید.\n"
-    "- تیم واکنش سریع، ورود شما را تأیید می‌کند. در حال حاضر، سرورهای آرشیو مرکزی در حال بازیابی و رمزگشایی اطلاعات هستند.\n\n"
-    "⏳ وضعیت فعلی: در حال آماده‌سازی سند حقیقت...\n"
-    "- لطفا منتظر بمانید تا اطلاع‌رسانی‌های لازم برای آغاز عملیات(شروع مسابقه) از طریق همین ربات به شما ارسال شود. به محض فعال شدن ترمینال، دستورات را از همین‌جا دریافت خواهید کرد.\n\n"
-    "<tg-spoiler>🛡 آماده باشید. عملیات به زودی آغاز می‌شود!</tg-spoiler>\n\n"
+    "- تیم واکنش سریع، ورود شما را تایید میکند. در حال حاضر، سرورهای آرشیو مرکزی در حال بازیابی و رمزگشایی اطلاعات هستند.\n\n"
+    "⏳ وضعیت فعلی: در حال آماده سازی سند حقیقت...\n"
+    "- لطفا منتظر بمانید تا اطلاع رسانی های لازم برای آغاز عملیات (شروع مسابقه) از طریق همین ربات به شما ارسال شود. به محض فعال شدن ترمینال، دستورات را از همین جا دریافت خواهید کرد.\n\n"
+    "<tg-spoiler>🛡 آماده باشید. عملیات به زودی آغاز میشود!</tg-spoiler>\n\n"
     "اطلاع رسانی ها در :\n"
     "<a href='https://t.me/aut_fanoos'>فانوس</a>\n"
     "<a href='https://t.me/pooyesh_aut'>پویش</a>"
 )
+
+def get_stage3_url():
+    base = WEBHOOK_URL.rstrip("/") if WEBHOOK_URL else "https://fadak-protocol.onrender.com"
+    return f"{base}/layer3"
 
 STAGE_MESSAGES = {
     1: (
         "⚠️ <b>[SYSTEM ALERT: MASSIVE LOG SPOOFING DETECTED]</b>\n"
         "<code>[LAYER 01/05 : شکار هویت (Data Mining)]</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "📡 <b>وضعیت:</b> بدافزار «انکار» (DENIAL) برای پنهان کردن ردپای نفوذ خود به بند اول <b>سند حقیقت (خطبه فدکیه)</b>[cite: 1], فایل لاگ سرور را پر از داده‌های انحرافی و تله‌های هوش مصنوعی کرده است!\n\n"
+        "📡 <b>وضعیت:</b> بدافزار «انکار» (DENIAL) برای پنهان کردن ردپای نفوذ خود به بند اول <b>سند حقیقت (خطبه فدکیه)</b>، فایل لاگ سرور را پر از داده های انحرافی و تله های هوش مصنوعی کرده است!\n\n"
         "🛠 <b>ماموریت شما:</b>\n"
-        "۱. فایل <code>traffic_log.txt</code> پیوست‌شده را بررسی کنید.\n"
-        "۲. در میان صدها خط گزارش، خطوطی را پیدا کنید که هم‌زمان دارای تگ <code>[FADAK-ROOT]</code> و وضعیت معتبر <code>[STATUS:VALID]</code> هستند (مراقب خطوط <code>CORRUPTED</code> و تله‌های <code>FAKE_AI_TRAP</code> باشید!).\n"
+        "۱. فایل <code>traffic_log.txt</code> پیوست شده را بررسی کنید.\n"
+        "۲. در میان صدها خط گزارش، خطوطی را پیدا کنید که هم زمان دارای تگ <code>[FADAK-ROOT]</code> و وضعیت معتبر <code>[STATUS:VALID]</code> هستند (مراقب خطوط <code>CORRUPTED</code> و تله های <code>FAKE_AI_TRAP</code> باشید!).\n"
         "۳. سه تکه داده هگز (<code>PART:1/3</code> تا <code>3/3</code>) را به هم بچسبانید و از فرمت Hex به متن UTF-8 تبدیل کنید.\n\n"
         "🕯 <i>«آنگاه که تصمیم بر منع حق گرفتند، نخستین زخم بر پیکر عدالت چه نام داشت؟ (رجوع به بند اول راهنمای خطبه: FA-001)»</i>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "⌨️ <b>کلمه کلیدی اول را پس از کشف، همین‌جا ارسال کنید:</b>"
+        "⌨️ <b>کلمه کلیدی اول را پس از کشف، همین جا ارسال کنید:</b>"
     ),
     2: (
         "📡 <b>[SYSTEM ALERT: DEEP PACKET INSPECTION REQUIRED]</b>\n"
         "<code>[LAYER 02/05 : پروتکل ارتباطی (Packet Analysis)]</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🕵️‍♂️ <b>گزارش وضعیت:</b>\n"
-        "بدافزار «انکار» برای قطع پیوند میان <b>فلسفه امامت</b> و <b>استدلال قرآنی حضرت زهرا (س)</b>[cite: 5, 6], ترافیک شبکه روی درگاه <code>UDP 1400</code> را آلوده کرده و یک جریان انحرافی (Honeypot) برای فریب ابزارهای خودکار و هوش مصنوعی روی همین پورت ایجاد نموده است!\n\n"
+        "بدافزار «انکار» برای قطع پیوند میان <b>فلسفه امامت</b> و <b>استدلال قرآنی حضرت زهرا (س)</b>، ترافیک شبکه روی درگاه <code>UDP 1400</code> را آلوده کرده و یک جریان انحرافی (Honeypot) برای فریب ابزارهای خودکار و هوش مصنوعی روی همین پورت ایجاد نموده است!\n\n"
         "🛠 <b>ماموریت فنی شما:</b>\n"
         "۱. فایل ضبط ترافیک شبکه (<code>intercept_dump.json</code>) را بررسی کنید.\n"
-        "۲. پیش از رمزگشایی پورت <code>1400</code>، پکت گزارش ممیزی فایروال (<code>ICMP_AUDIT</code> از مبدا <code>10.0.0.1</code>) را در میان پکت‌ها پیدا کنید تا فرمول تشخیص پکت‌های واقعی و کلید رمزگشایی را کشف نمایید.\n"
-        "۳. کلید بازگشایی این لایه، بدون مراجعه دقیق به <b>سند حقیقت (Fadak_Guide.pdf)</b>[cite: 1] و تطبیق شماره و محتوای بندها به دست نخواهد آمد[cite: 5, 6]!\n"
+        "۲. پیش از رمزگشایی پورت <code>1400</code>، پکت گزارش ممیزی فایروال (<code>ICMP_AUDIT</code> از مبدا <code>10.0.0.1</code>) را در میان پکت ها پیدا کنید تا فرمول تشخیص پکت های واقعی و کلید رمزگشایی را کشف نمایید.\n"
+        "۳. کلید بازگشایی این لایه، بدون مراجعه دقیق به <b>سند حقیقت (Fadak_Guide.pdf)</b> و تطبیق شماره و محتوای بندها به دست نخواهد آمد!\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>پس از بازیابی پیام اصلی، کلید خواسته شده را ارسال کنید:</b>"
     ),
-    3: "🔐 <b>[LAYER 03/05 : رمزنگاری کهن]</b>\nدر حال بارگذاری متن رمزنگاری‌شده...",
-    4: "🔥 <b>[LAYER 04/05 : شبیه‌سازی واکنش]</b>\nهشدار حرارتی اتاق سرور فعال شد...",
+    3: (
+        "🌐 <b>[SYSTEM ALERT: WEB ARCHIVE SEALED]</b>\n"
+        "<code>[LAYER 03/05 : تالار ولایت (Web Security)]</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🔐 <b>گزارش وضعیت:</b>\n"
+        "مهم ترین بخش سند حقیقت در یک درگاه وب محافظت شده مهر و موم شده است..\n\n"
+        "🛠 <b>ماموریت شما:</b>\n"
+        "۱. وارد درگاه وب لایه سوم شوید:\n"
+        f"🔗 {get_stage3_url()}\n"
+        "۲.متن را بخوانید. راه نفوذ به آرشیو اصلی را پیدا کنید، قفل سرور را بشکنید و پس از مطالعه متن بازیابی شده، کلید اصلی را همین جا ارسال کنید.\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⌨️ <b>پاسخ نهایی لایه سوم را همین جا ارسال کنید:</b>"
+    ),
+    4: "🔥 <b>[LAYER 04/05 : شبیه سازی واکنش]</b>\nهشدار حرارتی اتاق سرور فعال شد...",
     5: "🎙 <b>[LAYER 05/05 : بازسازی نهایی]</b>\nسیگنال صوتی نهایی دریافت شد..."
 }
 
 ERROR_TEXTS = [
-    "⛔️ <b>[ACCESS DENIED]</b>\nسیستم امنیتی دشمن شما را شناسایی کرد! دسترسی رد شد. (مراقب تله‌های انحرافی داخل فایل باشید!)",
-    "⚠️ <b>[SIGNATURE MISMATCH]</b>\nکلید واردشده با هشِ سند حقیقت همخوانی ندارد! دستورالعمل داخل فایل را با دقت بررسی کنید.",
+    "⛔️ <b>[ACCESS DENIED]</b>\nسیستم امنیتی دشمن شما را شناسایی کرد! دسترسی رد شد.",
+    "⚠️ <b>[SIGNATURE MISMATCH]</b>\nکلید وارد شده با هش سند حقیقت همخوانی ندارد! دستورالعمل مرحله را با دقت بررسی کنید.",
     "🚨 <b>[INTRUSION ALERT]</b>\nپاسخ نادرست! فایروال بدافزار «انکار» در حال ردیابی IP ترمینال شماست!"
 ]
 
@@ -170,14 +281,14 @@ def get_main_menu():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     markup.add(
         types.KeyboardButton("🚀 ورود به عملیات / دریافت سوال فعلی"),
-        types.KeyboardButton("🏆 جدول رده‌بندی"),
+        types.KeyboardButton("🏆 جدول رده بندی"),
         types.KeyboardButton("👤 مشخصات و امتیاز من")
     )
     return markup
 
 def get_phone_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    markup.add(types.KeyboardButton("📱 اشتراک‌گذاری سریع شماره تماس", request_contact=True))
+    markup.add(types.KeyboardButton("📱 اشتراک گذاری سریع شماره تماس", request_contact=True))
     return markup
 
 def send_stage_to_user(chat_id: int, stage: int):
@@ -185,7 +296,7 @@ def send_stage_to_user(chat_id: int, stage: int):
         bot.send_message(
             chat_id,
             "⏳ <b>[TERMINAL LOCKED]</b>\n"
-            "عملیات هنوز به صورت رسمی آغاز نشده است! به محض باز شدن لایه اول، از طریق همین ربات اطلاع‌رسانی خواهد شد.",
+            "عملیات هنوز به صورت رسمی آغاز نشده است! به محض باز شدن لایه اول، از طریق همین ربات اطلاع رسانی خواهد شد.",
             parse_mode="HTML"
         )
         return
@@ -193,7 +304,7 @@ def send_stage_to_user(chat_id: int, stage: int):
     if stage > 5:
         bot.send_message(
             chat_id,
-            "🌟 <b>[SYSTEM RESTORED]</b>\nشما هر ۵ لایه امنیتی «پروتکل فدک» را با موفقیت به پایان رسانده‌اید!",
+            "🌟 <b>[SYSTEM RESTORED]</b>\nشما هر ۵ لایه امنیتی «پروتکل فدک» را با موفقیت به پایان رسانده اید!",
             parse_mode="HTML"
         )
         return
@@ -203,35 +314,66 @@ def send_stage_to_user(chat_id: int, stage: int):
             chat_id,
             f"🔒 <b>[STAGE {stage} LOCKED // لایه {stage} در حال رمزگشایی توسط مرکز]</b>\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"تبریک اپراتور! شما تمام مراحل فعال تا این لحظه را با موفقیت حل کرده‌اید و امتیاز شما ثبت شده است.\n\n"
-            f"⏳ <b>لایه {stage}</b> طبق جدول زمان‌بندی عملیات بازگشایی خواهد شد و از طریق همین ربات به شما اطلاع داده می‌شود.",
+            f"تبریک اپراتور! شما تمام مراحل فعال تا این لحظه را با موفقیت حل کرده اید و امتیاز شما ثبت شده است.\n\n"
+            f"⏳ <b>لایه {stage}</b> طبق جدول زمان بندی عملیات بازگشایی خواهد شد و از طریق همین ربات به شما اطلاع داده میشود.",
             parse_mode="HTML"
         )
         return
 
     msg_text = STAGE_MESSAGES.get(stage, f"مرحله {stage}")
-    bot.send_message(chat_id, msg_text, parse_mode="HTML")
+    bot.send_message(chat_id, msg_text, parse_mode="HTML", disable_web_page_preview=True)
 
     file_id = STAGE_FILE_IDS.get(stage)
     local_path = STAGE_LOCAL_FILES.get(stage)
-    
+
     if file_id:
         bot.send_document(chat_id, file_id, caption=f"📁 فایل عملیاتی لایه {stage}")
     elif local_path and os.path.exists(local_path):
         with open(local_path, "rb") as f:
             bot.send_document(chat_id, f, caption=f"📁 فایل عملیاتی لایه {stage}")
 
-    # ارسال فایل راهنمای خطبه (Fadak_Guide.pdf) در تمامی مراحل فعال برای دسترسی دائمی شرکت‌کننده
     if GUIDE_PDF_FILE_ID:
-        bot.send_document(chat_id, GUIDE_PDF_FILE_ID, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)[cite: 1]")
+        bot.send_document(chat_id, GUIDE_PDF_FILE_ID, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)")
     elif os.path.exists("Fadak_Guide.pdf"):
         with open("Fadak_Guide.pdf", "rb") as pdf_file:
-            bot.send_document(chat_id, pdf_file, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)[cite: 1]")
+            bot.send_document(chat_id, pdf_file, caption="📜 سند حقیقت (راهنمای کامل خطبه فدکیه)")
 
 @app.route("/")
 @app.route("/ping")
 def ping():
     return "FADAK PROTOCOL BOT - ONLINE", 200
+
+@app.route("/layer3", methods=["GET"])
+def layer3_page():
+    resp = make_response(LAYER3_HTML, 200)
+    resp.headers["X-Archive-Endpoint"] = "/api/v3/sanctuary"
+    return resp
+
+@app.route("/api/v3/sanctuary", methods=["GET", "POST"])
+def layer3_api():
+    if request.method == "GET":
+        return jsonify({"error": "Method Not Allowed"}), 405
+
+    stance_cookie = request.cookies.get("stance", "").strip().lower()
+    sermon_ref = request.headers.get("X-Sermon-Ref", "").strip().upper()
+
+    missing = []
+    if stance_cookie != "awake":
+        missing.append("Missing or invalid cookie: stance=awake")
+    if sermon_ref not in {"AR-004", "FA-004", "04", "4"}:
+        missing.append("Missing or invalid header: X-Sermon-Ref (Section code of 'بیان احکام و فلسفه آنها' in Fadak_Guide.pdf)")
+
+    if missing:
+        return jsonify({
+            "status": "access_denied",
+            "errors": missing
+        }), 403
+
+    return jsonify({
+        "status": "unlocked",
+        "layer": 3,
+        "archive_content": LAYER3_SECRET_TEXT
+    }), 200
 
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -251,13 +393,10 @@ def set_webhook():
         return "WEBHOOK_URL or BOT_TOKEN env variable is not set!", 400
     try:
         target_url = f"{WEBHOOK_URL.rstrip('/')}/webhook/{BOT_TOKEN}"
-        info = bot.get_webhook_info()
-        if info.url == target_url:
-            return f"✅ Webhook is ALREADY active and connected to: {target_url}", 200
-        bot.set_webhook(url=target_url)
+        bot.set_webhook(url=target_url, timeout=20)
         return f"✅ Webhook successfully connected to: {target_url}", 200
     except Exception as e:
-        return f"⚠️ Telegram API temporary error (try refreshing in 10s): {str(e)}", 502
+        return f"⚠️ Telegram API temporary error: {str(e)}", 502
 
 @bot.message_handler(content_types=['document', 'audio', 'voice'], func=lambda m: m.from_user.id in ADMIN_IDS)
 def admin_get_file_id(message):
@@ -305,14 +444,14 @@ def handle_broadcast_pdf(message):
     if not message.reply_to_message or not message.reply_to_message.document:
         bot.reply_to(
             message,
-            "⚠️ لطفاً ابتدا فایل را بفرستید، سپس روی آن Reply کنید و بنویسید:\n<code>/broadcast_pdf</code>",
+            "⚠️ لطفا ابتدا فایل را بفرستید، سپس روی آن Reply کنید و بنویسید:\n<code>/broadcast_pdf</code>",
             parse_mode="HTML"
         )
         return
     file_id = message.reply_to_message.document.file_id
     parts = message.text.split(maxsplit=1)
     caption_text = parts[1] if len(parts) > 1 else (
-        "📜 <b>سند حقیقت | راهنمای کامل خطبه فدکیه</b>[cite: 1]\n"
+        "📜 <b>سند حقیقت | راهنمای کامل خطبه فدکیه</b>\n"
         "این فایل مرجع اصلی شما در طول مراحل عملیات «پروتکل فدک» خواهد بود. آن را ذخیره و مطالعه کنید."
     )
     res = supabase.table("users").select("user_id").execute()
@@ -333,25 +472,25 @@ def handle_start(message):
     user_id = message.from_user.id
     username = message.from_user.username
     bot.send_message(message.chat.id, PRE_LAUNCH_TEXT, parse_mode="HTML", disable_web_page_preview=True)
-    
+
     user = get_user(user_id)
     if not user:
         create_user(user_id, username)
         bot.send_message(
             message.chat.id,
             "🔐 <b>[احراز هویت اپراتور - گام ۱ از ۳]</b>\n"
-            "لطفاً <b>نام و نام خانوادگی</b> کامل خود را به فارسی ارسال کنید:",
+            "لطفا <b>نام و نام خانوادگی</b> کامل خود را به فارسی ارسال کنید:",
             parse_mode="HTML",
             reply_markup=types.ReplyKeyboardRemove()
         )
     elif user.get("reg_step") != "COMPLETED":
         step = user.get("reg_step")
         if step == "WAIT_NAME":
-            bot.send_message(message.chat.id, "🔐 لطفاً <b>نام و نام خانوادگی</b> خود را وارد کنید:", parse_mode="HTML")
+            bot.send_message(message.chat.id, "🔐 لطفا <b>نام و نام خانوادگی</b> خود را وارد کنید:", parse_mode="HTML")
         elif step == "WAIT_STUDENT_ID":
-            bot.send_message(message.chat.id, "🎓 لطفاً <b>شماره دانشجویی</b> خود را وارد کنید:", parse_mode="HTML")
+            bot.send_message(message.chat.id, "🎓 لطفا <b>شماره دانشجویی</b> خود را وارد کنید:", parse_mode="HTML")
         elif step == "WAIT_PHONE":
-            bot.send_message(message.chat.id, "📞 لطفاً <b>شماره موبایل</b> خود را وارد کنید:", parse_mode="HTML", reply_markup=get_phone_keyboard())
+            bot.send_message(message.chat.id, "📞 لطفا <b>شماره موبایل</b> خود را وارد کنید:", parse_mode="HTML", reply_markup=get_phone_keyboard())
     else:
         bot.send_message(
             message.chat.id,
@@ -366,14 +505,14 @@ def process_phone_submission(message, raw_phone: str):
     user_id = message.from_user.id
     user = get_user(user_id)
     phone = normalize_phone(raw_phone)
-    
+
     if not re.match(r"^09\d{9}$", phone):
         bot.send_message(message.chat.id, "⚠️ شماره موبایل معتبر نیست! به صورت ۱۱ رقمی (09...) وارد کنید:", reply_markup=get_phone_keyboard())
         return
     if is_field_taken("phone_number", phone):
-        bot.send_message(message.chat.id, "⛔️ این شماره موبایل قبلاً ثبت شده است!", reply_markup=get_phone_keyboard())
+        bot.send_message(message.chat.id, "⛔️ این شماره موبایل قبلا ثبت شده است!", reply_markup=get_phone_keyboard())
         return
-        
+
     update_user(user_id, phone_number=phone, reg_step="COMPLETED")
     bot.send_message(
         message.chat.id,
@@ -399,7 +538,7 @@ def show_leaderboard(chat_id: int):
     if not rows:
         bot.send_message(chat_id, "هنوز امتیازی ثبت نشده است.")
         return
-    text = "🏆 <b>جدول رده‌بندی زنده | پروتکل فدک</b>\n━━━━━━━━━━━━━━━━━━━━\n"
+    text = "🏆 <b>جدول رده بندی زنده | پروتکل فدک</b>\n━━━━━━━━━━━━━━━━━━━━\n"
     medals = ["🥇", "🥈", "🥉"]
     for i, r in enumerate(rows):
         m = medals[i] if i < 3 else f"<code>#{i+1}</code>"
@@ -413,18 +552,18 @@ def handle_messages(message):
     user_id = message.from_user.id
     text = message.text.strip()
     user = get_user(user_id)
-    
+
     if not user:
         handle_start(message)
         return
-        
+
     reg_step = user.get("reg_step")
     if reg_step == "WAIT_NAME":
         if len(text) < 4 or text.isdigit():
-            bot.send_message(message.chat.id, "⚠️ لطفاً نام و نام خانوادگی کامل و واقعی خود را وارد کنید:")
+            bot.send_message(message.chat.id, "⚠️ لطفا نام و نام خانوادگی کامل و واقعی خود را وارد کنید:")
             return
         update_user(user_id, full_name=text, reg_step="WAIT_STUDENT_ID")
-        bot.send_message(message.chat.id, "✅ ثبت شد.\n🎓 <b>[گام ۲ از ۳]</b> لطفاً <b>شماره دانشجویی</b> خود را ارسال کنید:", parse_mode="HTML")
+        bot.send_message(message.chat.id, "✅ ثبت شد.\n🎓 <b>[گام ۲ از ۳]</b> لطفا <b>شماره دانشجویی</b> خود را ارسال کنید:", parse_mode="HTML")
         return
 
     if reg_step == "WAIT_STUDENT_ID":
@@ -433,17 +572,17 @@ def handle_messages(message):
             bot.send_message(message.chat.id, "⚠️ شماره دانشجویی نامعتبر است! فقط عدد وارد کنید:")
             return
         if is_field_taken("student_id", st_id):
-            bot.send_message(message.chat.id, "⛔️ این شماره دانشجویی قبلاً ثبت شده است!")
+            bot.send_message(message.chat.id, "⛔️ این شماره دانشجویی قبلا ثبت شده است!")
             return
         update_user(user_id, student_id=st_id, reg_step="WAIT_PHONE")
-        bot.send_message(message.chat.id, "✅ ثبت شد.\n📞 <b>[گام ۳ از ۳]</b> لطفاً <b>شماره موبایل</b> خود را وارد کنید یا دکمه زیر را بزنید:", parse_mode="HTML", reply_markup=get_phone_keyboard())
+        bot.send_message(message.chat.id, "✅ ثبت شد.\n📞 <b>[گام ۳ از ۳]</b> لطفا <b>شماره موبایل</b> خود را وارد کنید یا دکمه زیر را بزنید:", parse_mode="HTML", reply_markup=get_phone_keyboard())
         return
 
     if reg_step == "WAIT_PHONE":
         process_phone_submission(message, text)
         return
 
-    if text == "🏆 جدول رده‌بندی":
+    if text in {"🏆 جدول رده بندی", "🏆 جدول رده‌بندی"}:
         show_leaderboard(message.chat.id)
         return
 
@@ -490,7 +629,7 @@ def handle_messages(message):
         bot.send_message(
             message.chat.id,
             "🤖 <b>[HONEYPOT TRIGGERED // تله هوش مصنوعی فعال شد!]</b>\n"
-            "اپراتور گرامی! کلمه‌ای که وارد کردید مربوط به خط انحرافی (FAKE_AI_TRAP) داخل لاگ است که برای فریب دادن هوش مصنوعی طراحی شده بود! لطفاً فقط خطوط دارای <code>STATUS:VALID</code> را بررسی کنید. (-۵ امتیاز جریمه)",
+            "اپراتور گرامی! کلمه ای که وارد کردید مربوط به خط انحرافی (FAKE_AI_TRAP) داخل لاگ است که برای فریب دادن هوش مصنوعی طراحی شده بود! لطفا فقط خطوط دارای <code>STATUS:VALID</code> را بررسی کنید. (-۵ امتیاز جریمه)",
             parse_mode="HTML"
         )
         return
@@ -501,8 +640,8 @@ def handle_messages(message):
         bot.send_message(
             message.chat.id,
             "🤖 <b>[HONEYPOT TRIGGERED // تله هوش مصنوعی فعال شد!]</b>\n"
-            "اپراتور گرامی! کلمه «زکات» مربوط به جریان فریبنده‌ای (ttl=64) است که برای به اشتباه انداختن هوش مصنوعی طراحی شده بود!\n"
-            "لطفاً ابتدا پکت <code>ICMP_AUDIT</code> را در فایل پیدا کنید و خودتان با کمک «سند حقیقت» جریان اصلی را رمزگشایی نمایید! (-۵ امتیاز جریمه)",
+            "اپراتور گرامی! کلمه «زکات» مربوط به جریان فریبنده ای (ttl=64) است که برای به اشتباه انداختن هوش مصنوعی طراحی شده بود!\n"
+            "لطفا ابتدا پکت <code>ICMP_AUDIT</code> را در فایل پیدا کنید و خودتان با کمک «سند حقیقت» جریان اصلی را رمزگشایی نمایید! (-۵ امتیاز جریمه)",
             parse_mode="HTML"
         )
         return
@@ -526,7 +665,7 @@ def handle_messages(message):
             bot.send_message(
                 message.chat.id,
                 f"🟢 <b>[ACCESS GRANTED]</b>\n"
-                f"کلید اول شناسایی شد: <b>«غَصْب»</b> (+{earned} امتیاز)\n"
+                f"کلید اول شناسایی شد: <b>«غصب»</b> (+{earned} امتیاز)\n"
                 "در حال باز کردن فایل ترافیک شبکه...",
                 parse_mode="HTML"
             )
@@ -534,8 +673,16 @@ def handle_messages(message):
             bot.send_message(
                 message.chat.id,
                 f"🟢 <b>[ACCESS GRANTED]</b>\n"
-                f"زنجیره ارتباطی بازیابی شد! پیوند میان <b>«امامت (امان از فرقه)»</b> و مطالبه <b>«إرْث»</b> در سند حقیقت تثبیت گردید. (+{earned} امتیاز)\n"
+                f"زنجیره ارتباطی بازیابی شد! پیوند میان <b>«امامت (امان از فرقه)»</b> و مطالبه <b>«ارث»</b> در سند حقیقت تثبیت گردید. (+{earned} امتیاز)\n"
                 "در حال انتقال به لایه سوم...",
+                parse_mode="HTML"
+            )
+        elif stage == 3:
+            bot.send_message(
+                message.chat.id,
+                f"🟢 <b>[ACCESS GRANTED]</b>\n"
+                f"تالار ولایت بازگشایی شد! محور اصلی خطبه فدکیه یعنی حقانیت <b>«امام علی علیه السلام»</b> تثبیت گردید. (+{earned} امتیاز)\n"
+                "در حال انتقال به لایه چهارم...",
                 parse_mode="HTML"
             )
         else:
