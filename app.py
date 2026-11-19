@@ -1,5 +1,7 @@
 import os
 import re
+import io
+import csv
 import time
 import base64
 import hashlib
@@ -37,6 +39,8 @@ STAGE_LOCAL_FILES = {
 
 SERVER_START_TIME = time.time()
 STAGE_UNLOCK_TS = float(os.environ.get("STAGE_UNLOCK_TS", "0") or 0) or SERVER_START_TIME
+STAGE5_TOKEN_TTL = 200
+STAGE5_SECRET = "FADAK_S5_ETERNAL_1448"
 
 apihelper.CONNECT_TIMEOUT = 15
 apihelper.READ_TIMEOUT = 25
@@ -73,6 +77,32 @@ def normalize_answer(text: str) -> str:
 def hash_text(text: str) -> str:
     return hashlib.sha256(normalize_answer(text).encode("utf-8")).hexdigest()
 
+def get_user_stage5_code(student_id: str) -> str:
+    clean_id = to_english_digits(str(student_id or "")).strip()
+    digest = hashlib.sha256(f"{STAGE5_SECRET}:{clean_id}".encode("utf-8")).hexdigest()
+    return str(int(digest[:8], 16) % 9000 + 1000)
+
+def create_stage5_token(student_id: str) -> str:
+    ts = str(int(time.time()))
+    sig = hashlib.sha256(f"{student_id}.{ts}.{STAGE5_SECRET}".encode("utf-8")).hexdigest()[:16]
+    return f"{student_id}.{ts}.{sig}"
+
+def verify_stage5_token(token: str):
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        return None, "Invalid token format."
+    student_id, ts_str, sig = parts
+    expected_sig = hashlib.sha256(f"{student_id}.{ts_str}.{STAGE5_SECRET}".encode("utf-8")).hexdigest()[:16]
+    if sig != expected_sig:
+        return None, "Invalid token signature."
+    try:
+        ts = int(ts_str)
+    except ValueError:
+        return None, "Invalid token timestamp."
+    if time.time() - ts > STAGE5_TOKEN_TTL:
+        return None, "Session token expired (200 seconds limit exceeded). Request a new handshake."
+    return student_id, None
+
 VALID_STAGE_HASHES = {
     1: {hash_text("غصب"), hash_text("GHASB")},
     2: {
@@ -87,14 +117,20 @@ VALID_STAGE_HASHES = {
         hash_text("امیرالمومنین"),
         hash_text("امیر المومنین")
     },
-    4: {hash_text("حق")},
-    5: {hash_text("فدک حق لنا"), hash_text("FADAKHAQLANA")}
+    4: {hash_text("حق")}
 }
 
 AI_TRAP_HASH_STAGE1 = {hash_text("سقیفه"), hash_text("فراموشی"), hash_text("SAQIFEH")}
 AI_TRAP_HASH_STAGE2 = {hash_text("زکات"), hash_text("ZAKAT"), hash_text("شهادت محمد"), hash_text("ولایت"), hash_text("خلافت")}
 
 LAYER3_KEY_B64 = base64.b64encode("امیرالمومنین".encode("utf-8")).decode("utf-8")
+
+VALID_LAYER5_CHAINS = {
+    hashlib.sha256("غصب-ارث-امیرالمومنین-حق".encode("utf-8")).hexdigest(),
+    hashlib.sha256("غصب-ارث-فرقه-امیرالمومنین-حق".encode("utf-8")).hexdigest(),
+    hashlib.sha256("غصب-ارث-امیر المومنین-حق".encode("utf-8")).hexdigest(),
+    hashlib.sha256("غصب-ارث-امیرالمؤمنین-حق".encode("utf-8")).hexdigest()
+}
 
 def normalize_phone(phone: str) -> str:
     phone = to_english_digits(phone)
@@ -191,14 +227,12 @@ LAYER3_HTML = """<!DOCTYPE html>
 <body class="min-h-screen flex items-center justify-center p-4 selection:bg-fadak-emerald selection:text-black">
     <div class="laser-accent w-72 top-20 -left-12 opacity-45"></div>
     <div class="laser-accent w-96 bottom-24 -right-20 opacity-35"></div>
-
     <main class="max-w-xl w-full relative z-10">
         <div class="cyber-card rounded-2xl p-7 sm:p-10 border-r-4 border-r-fadak-red">
             <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-fadak-bg border border-fadak-border text-xs mb-6">
                 <span class="w-2 h-2 rounded-full bg-fadak-red animate-pulse"></span>
                 <span class="font-bold text-fadak-red tracking-wider font-mono">ARCHIVE // LAYER 03 // 403_SEALED</span>
             </div>
-
             <div class="flex items-center gap-3.5 mb-4">
                 <div class="w-12 h-12 rounded-xl border border-fadak-red/40 flex items-center justify-center bg-fadak-bg text-fadak-red shrink-0">
                     <i class="fa-solid fa-lock text-lg"></i>
@@ -207,17 +241,106 @@ LAYER3_HTML = """<!DOCTYPE html>
                     تالار ولایت — دسترسی مستقیم مسدود است
                 </h1>
             </div>
-
             <p class="text-gray-300 text-sm sm:text-base leading-8 text-justify mb-6">
                 آنچه در برابر چشم است، تنها پوسته ای از آرشیو مرکزی است...
             </p>
-
             <div class="border-t border-fadak-border/60 pt-4 flex items-center justify-between text-xs text-fadak-muted font-mono">
                 <span class="flex items-center gap-2">
                     <i class="fa-solid fa-shield-halved text-fadak-emerald"></i>
                     FADAK PROTOCOL
                 </span>
                 <span class="text-fadak-glow">403_SEALED</span>
+            </div>
+        </div>
+    </main>
+</body>
+</html>"""
+
+LAYER5_HTML = """<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>پروتکل فدک | لایه پنجم — مهر جاودانه</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fadak: {
+                            bg: '#041114',
+                            card: '#081c21',
+                            border: '#11424a',
+                            emerald: '#00ff9d',
+                            glow: '#2ee59d',
+                            red: '#ff3b4e',
+                            muted: '#81a8b0'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Vazirmatn', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #041114;
+            color: #d6f2ee;
+            font-family: 'Vazirmatn', sans-serif;
+            background-image:
+                radial-gradient(circle at 50% 10%, rgba(0, 255, 157, 0.14) 0%, transparent 45%),
+                radial-gradient(circle at 85% 80%, rgba(255, 59, 78, 0.08) 0%, transparent 40%),
+                linear-gradient(rgba(4, 17, 20, 0.96), rgba(4, 17, 20, 0.98));
+        }
+        .cyber-card {
+            background: rgba(8, 28, 33, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(46, 229, 157, 0.25);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+        }
+        .laser-accent {
+            position: fixed;
+            height: 1.5px;
+            background: linear-gradient(90deg, transparent, #00ff9d, transparent);
+            box-shadow: 0 0 8px #00ff9d;
+            transform: rotate(-30deg);
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4 selection:bg-fadak-emerald selection:text-black">
+    <div class="laser-accent w-72 top-20 -left-12 opacity-40"></div>
+    <div class="laser-accent w-96 bottom-24 -right-20 opacity-30"></div>
+    <main class="max-w-xl w-full relative z-10">
+        <div class="cyber-card rounded-2xl p-7 sm:p-10 border-r-4 border-r-fadak-emerald">
+            <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-fadak-bg border border-fadak-border text-xs mb-6">
+                <span class="w-2 h-2 rounded-full bg-fadak-emerald animate-pulse"></span>
+                <span class="font-bold text-fadak-emerald tracking-wider font-mono">ARCHIVE // FINAL LAYER 05 // ETERNAL SEAL</span>
+            </div>
+            <div class="flex items-center gap-3.5 mb-4">
+                <div class="w-12 h-12 rounded-xl border border-fadak-emerald/40 flex items-center justify-center bg-fadak-bg text-fadak-emerald shrink-0">
+                    <i class="fa-solid fa-wave-square text-lg"></i>
+                </div>
+                <h1 class="text-xl sm:text-2xl font-black text-white leading-snug">
+                    ایستگاه نهایی — رمزگشایی سیگنال صوتی
+                </h1>
+            </div>
+            <p class="text-gray-300 text-sm sm:text-base leading-8 text-justify mb-6">
+                لایه ظاهری سیگنال صوتی (final_message.wav) برای به اشتباه انداختن ابزارهای خودکار دستکاری شده است. پارامترهای دقیق استخراج سیگنال واقعی، تنها در پاسخ شبکه همین ایستگاه ثبت شده اند.
+            </p>
+            <div class="border-t border-fadak-border/60 pt-4 flex items-center justify-between text-xs text-fadak-muted font-mono">
+                <span class="flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved text-fadak-emerald"></i>
+                    FADAK PROTOCOL
+                </span>
+                <span class="text-fadak-glow">FINAL_GATE_05</span>
             </div>
         </div>
     </main>
@@ -234,6 +357,15 @@ LAYER3_SECRET_TEXT = (
     "تمام آن خطبه کوبنده و ایستادگی بی نظیر در برابر سکوت سنگین مدینه، برای این بود که حقانیت و جایگاه امام علی علیه السلام زیر غبار فراموشی و تحریف دفن نشود."
 )
 
+LAYER5_SECRET_TEXT = (
+    "سند حقیقت به طور کامل بازیابی شد! (کلید اختصاصی شما در هدر X-Eternal-Seal همین پاسخ قرار دارد)\n\n"
+    "در بند پایانی خطبه، وقتی حضرت زهرا (س) پس از آن خروش تاریخی به خانه بازگشتند، پاسخ آرام و عمیق امیرالمومنین (ع) نقطه اوج بصیرت بود: "
+    "حقیقت را نمیتوان با زور و سکوت از حافظه تاریخ پاک کرد. "
+    "آنچه از غصب شروع شد، با استدلال قرآنی ارث و تبیین محوریت ولایت ادامه یافت و با ایستادگی برای زنده نگه داشتن حق به اوج رسید، "
+    "امروز دیگر یک دعوای تاریخی نیست؛ بلکه نقشه راهی ابدی برای شناخت حق از باطل است. "
+    "بدافزار انکار شکست خورد و مهر جاودانه این سند با کد اختصاصی شما برای همیشه ثبت شد."
+)
+
 PRE_LAUNCH_TEXT = (
     "🟢 [SYSTEM ONLINE] \n"
     "⚪️ [اتصال امن برقرار شد]\n"
@@ -248,9 +380,8 @@ PRE_LAUNCH_TEXT = (
     "<a href='https://t.me/pooyesh_aut'>پویش</a>"
 )
 
-def get_stage3_url():
-    base = WEBHOOK_URL.rstrip("/") if WEBHOOK_URL else "https://fadak-protocol.onrender.com"
-    return f"{base}/layer3"
+def get_base_url():
+    return WEBHOOK_URL.rstrip("/") if WEBHOOK_URL else "https://fadak-protocol.onrender.com"
 
 STAGE_MESSAGES = {
     1: (
@@ -287,7 +418,7 @@ STAGE_MESSAGES = {
         "مهم ترین بخش سند حقیقت در یک درگاه وب محافظت شده مهر و موم شده است.\n\n"
         "🛠 <b>ماموریت شما:</b>\n"
         "۱. وارد درگاه وب لایه سوم شوید:\n"
-        f"🔗 {get_stage3_url()}\n"
+        f"🔗 {get_base_url()}/layer3\n"
         "۲. متن را بخوانید. راه نفوذ به آرشیو اصلی را پیدا کنید، قفل سرور را بشکنید و پس از مطالعه متن بازیابی شده، کلید اصلی را استخراج کرده و همین جا ارسال کنید.\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>پاسخ نهایی لایه سوم را همین جا ارسال کنید:</b>"
@@ -305,7 +436,20 @@ STAGE_MESSAGES = {
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>پاسخ نهایی لایه چهارم را همین جا ارسال کنید:</b>"
     ),
-    5: "🎙 <b>[LAYER 05/05 : بازسازی نهایی]</b>\nسیگنال صوتی نهایی دریافت شد..."
+    5: (
+        "🎙 <b>[FINAL ALERT: ETERNAL SEAL ENCRYPTED]</b>\n"
+        "<code>[LAYER 05/05 : بازسازی نهایی (Audio Forensics + Web API)]</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "📡 <b>گزارش وضعیت:</b>\n"
+        "به آخرین و سخت ترین سد امنیتی بدافزار «انکار» رسیدید. سیگنال صوتی <code>final_message.wav</code> بازیابی شده اما روی آن لایه فریب قرار دارد.\n\n"
+        "🛠 <b>ماموریت نهایی شما:</b>\n"
+        "۱. ابتدا وارد ایستگاه وب لایه پنجم شوید تا پارامترهای رمزگشایی سیگنال صوتی را کشف کنید:\n"
+        f"🔗 {get_base_url()}/layer5\n"
+        "۲. فایل صوتی <code>final_message.wav</code> را مطابق پارامترهای کشف شده تحلیل کنید تا دستورالعمل درگاه نهایی سرور استخراج شود.\n"
+        "۳. قفل دو مرحله ای سرور را با <b>شماره دانشجویی خودتان</b> و کلیدهای مراحل قبل در مهلت مجاز باز کنید تا کلید اختصاصی خودتان را دریافت نمایید.\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⌨️ <b>عبارت کلیدی اختصاصی خودتان را ارسال کنید:</b>"
+    )
 }
 
 ERROR_TEXTS = [
@@ -341,7 +485,10 @@ def send_stage_to_user(chat_id: int, stage: int):
     if stage > 5:
         bot.send_message(
             chat_id,
-            "🌟 <b>[SYSTEM RESTORED]</b>\nشما هر ۵ لایه امنیتی «پروتکل فدک» را با موفقیت به پایان رسانده اید!",
+            "🌟 <b>[SYSTEM RESTORED // عملیات با موفقیت به پایان رسید]</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "تبریک اپراتور! شما هر ۵ لایه امنیتی «پروتکل فدک» را با موفقیت شکستید و سند حقیقت برای همیشه تثبیت شد.\n\n"
+            "🏆 نتایج نهایی و جوایز پس از ساعت ۲۲:۰۰ امشب و بازبینی جدول اعلام خواهد شد.",
             parse_mode="HTML"
         )
         return
@@ -414,6 +561,79 @@ def layer3_api():
     resp.headers["X-Sanctuary-Key"] = LAYER3_KEY_B64
     return resp
 
+@app.route("/layer5", methods=["GET"])
+def layer5_page():
+    resp = make_response(LAYER5_HTML, 200)
+    resp.headers["X-Audio-Decode"] = "LSB(offset=10008, stride=Section9_Number, xor=42)"
+    return resp
+
+@app.route("/api/v5/handshake", methods=["GET", "POST"])
+def layer5_handshake():
+    if request.method == "GET":
+        return jsonify({"error": "Method Not Allowed. Use POST."}), 405
+
+    archive_code = request.headers.get("X-Archive-Code", "").strip().upper()
+    chain_hash = request.headers.get("X-Chain-Hash", "").strip().lower()
+    student_id = to_english_digits(request.headers.get("X-Student-ID", "")).strip()
+
+    missing = []
+    if archive_code not in {"AR-009", "FA-009", "09", "9"}:
+        missing.append("Invalid or missing header: X-Archive-Code")
+    if chain_hash not in VALID_LAYER5_CHAINS:
+        missing.append("Invalid or missing header: X-Chain-Hash")
+    if not student_id.isdigit() or not (6 <= len(student_id) <= 12):
+        missing.append("Invalid or missing header: X-Student-ID")
+
+    if missing:
+        return jsonify({
+            "status": "handshake_failed",
+            "errors": missing
+        }), 403
+
+    token = create_stage5_token(student_id)
+    return jsonify({
+        "status": "handshake_accepted",
+        "session_token": token,
+        "expires_in_seconds": STAGE5_TOKEN_TTL,
+        "next_step": {
+            "method": "PUT",
+            "endpoint": "/api/v5/eternal_seal",
+            "required_headers": {
+                "X-Session-Token": "The session_token received above",
+                "X-Final-Proof": "SHA256(session_token + ':' + your_student_id)"
+            }
+        }
+    }), 200
+
+@app.route("/api/v5/eternal_seal", methods=["GET", "POST", "PUT"])
+def layer5_eternal_seal():
+    if request.method != "PUT":
+        return jsonify({"error": "Method Not Allowed. Use PUT."}), 405
+
+    token = request.headers.get("X-Session-Token", "").strip()
+    proof = request.headers.get("X-Final-Proof", "").strip().lower()
+
+    student_id, err = verify_stage5_token(token)
+    if err:
+        return jsonify({"status": "access_denied", "error": err}), 403
+
+    expected_proof = hashlib.sha256(f"{token}:{student_id}".encode("utf-8")).hexdigest()
+    if proof != expected_proof:
+        return jsonify({"status": "access_denied", "error": "Invalid X-Final-Proof."}), 403
+
+    user_code = get_user_stage5_code(student_id)
+    personal_flag = f"فدک حق لنا {user_code}"
+    encoded_flag = base64.b64encode(personal_flag.encode("utf-8")).decode("utf-8")
+
+    resp = make_response(jsonify({
+        "status": "restored",
+        "layer": 5,
+        "student_id": student_id,
+        "archive_content": LAYER5_SECRET_TEXT
+    }), 200)
+    resp.headers["X-Eternal-Seal"] = encoded_flag
+    return resp
+
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
     if request.headers.get("content-type") == "application/json":
@@ -453,6 +673,42 @@ def admin_get_file_id(message):
             f"🔑 <b>TELEGRAM FILE_ID:</b>\n<code>{fid}</code>",
             parse_mode="HTML"
         )
+
+@bot.message_handler(commands=['scoreboard'])
+def handle_admin_scoreboard(message):
+    if message.from_user.id not in ADMIN_IDS:
+        return
+    res = supabase.table("users").select("full_name, student_id, phone_number, current_stage, score, finished_at").eq("reg_step", "COMPLETED").order("score", desc=True).order("finished_at", desc=False).execute()
+    rows = res.data if res.data else []
+    if not rows:
+        bot.reply_to(message, "هیچ شرکت کننده ای ثبت نام نکرده است.")
+        return
+
+    chunk_size = 20
+    for start in range(0, len(rows), chunk_size):
+        chunk = rows[start:start + chunk_size]
+        lines = [f"📊 <b>جدول کامل شرکت کنندگان ({start + 1} تا {start + len(chunk)} از {len(rows)})</b>\n━━━━━━━━━━━━━━━━━━━━"]
+        for idx, r in enumerate(chunk, start=start + 1):
+            stg = r.get("current_stage", 1)
+            status = "اتمام" if stg > 5 else f"لایه {stg}"
+            lines.append(
+                f"<b>#{idx}</b> | {r.get('full_name')} | امتیاز: <code>{r.get('score', 0)}</code> ({status})\n"
+                f"🎓 <code>{r.get('student_id')}</code> | 📞 <code>{r.get('phone_number')}</code>"
+            )
+        bot.send_message(message.chat.id, "\n".join(lines), parse_mode="HTML")
+        time.sleep(0.1)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Rank", "Full Name", "Score", "Stage", "Student ID", "Phone Number"])
+    for idx, r in enumerate(rows, start=1):
+        stg = r.get("current_stage", 1)
+        status = "Completed" if stg > 5 else f"Stage {stg}"
+        writer.writerow([idx, r.get("full_name"), r.get("score", 0), status, r.get("student_id"), r.get("phone_number")])
+
+    csv_bytes = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    csv_bytes.name = "fadak_scoreboard.csv"
+    bot.send_document(message.chat.id, csv_bytes, caption=f"📁 فایل اکسل جدول کامل ({len(rows)} نفر)")
 
 @bot.message_handler(commands=['broadcast'])
 def handle_broadcast(message):
@@ -572,6 +828,15 @@ def handle_contact(message):
         process_phone_submission(message, message.contact.phone_number)
 
 def show_leaderboard(chat_id: int):
+    if MAX_UNLOCKED_STAGE >= 5:
+        bot.send_message(
+            chat_id,
+            "🔒 <b>[LEADERBOARD FROZEN]</b>\n"
+            "جدول امتیازات از ساعت ۱۶:۰۰ برای حفظ هیجان مرحله نهایی غیرفعال شده است.\n"
+            "نتایج نهایی پس از ساعت ۲۲:۰۰ و بازبینی جدول اعلام خواهد شد.",
+            parse_mode="HTML"
+        )
+        return
     res = supabase.table("users").select("full_name, current_stage, score, finished_at").eq("reg_step", "COMPLETED").order("score", desc=True).order("finished_at", desc=False).limit(10).execute()
     rows = res.data if res.data else []
     if not rows:
@@ -685,7 +950,13 @@ def handle_messages(message):
         )
         return
 
-    if ans_hash in VALID_STAGE_HASHES.get(stage, set()):
+    if stage == 5:
+        expected_code = get_user_stage5_code(user.get("student_id", ""))
+        is_valid = ans_hash == hash_text(f"فدک حق لنا {expected_code}")
+    else:
+        is_valid = ans_hash in VALID_STAGE_HASHES.get(stage, set())
+
+    if is_valid:
         fails = int(user.get("fail_count") or 0)
         base_score = stage * 100
         if stage < MAX_UNLOCKED_STAGE:
@@ -738,8 +1009,13 @@ def handle_messages(message):
                 "در حال آماده سازی برای لایه نهایی (لایه پنجم)...",
                 parse_mode="HTML"
             )
-        else:
-            bot.send_message(message.chat.id, f"🟢 <b>[ACCESS GRANTED]</b>\nلایه {stage} شکسته شد! (+{earned} امتیاز)", parse_mode="HTML")
+        elif stage == 5:
+            bot.send_message(
+                message.chat.id,
+                f"🟢 <b>[ETERNAL SEAL VERIFIED]</b>\n"
+                f"سند جاودانه <b>«فدک حق لنا»</b> با کد اختصاصی شما ثبت شد و بدافزار انکار به طور کامل پاکسازی گردید! (+{earned} امتیاز)",
+                parse_mode="HTML"
+            )
 
         send_stage_to_user(message.chat.id, new_stage)
     else:
