@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import base64
 import hashlib
 from flask import Flask, request, make_response, jsonify
 import telebot
@@ -34,6 +35,9 @@ STAGE_LOCAL_FILES = {
     5: "final_message.wav",
 }
 
+SERVER_START_TIME = time.time()
+STAGE_UNLOCK_TS = float(os.environ.get("STAGE_UNLOCK_TS", "0") or 0) or SERVER_START_TIME
+
 apihelper.CONNECT_TIMEOUT = 15
 apihelper.READ_TIMEOUT = 25
 apihelper.RETRY_ON_ERROR = True
@@ -41,6 +45,7 @@ apihelper.MAX_RETRIES = 3
 
 bot = telebot.TeleBot(BOT_TOKEN, threaded=False)
 app = Flask(__name__)
+app.json.ensure_ascii = False
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if SUPABASE_URL and SUPABASE_KEY else None
 
 RATE_LIMIT_MAX = 3
@@ -89,6 +94,8 @@ VALID_STAGE_HASHES = {
 AI_TRAP_HASH_STAGE1 = {hash_text("سقیفه"), hash_text("فراموشی"), hash_text("SAQIFEH")}
 AI_TRAP_HASH_STAGE2 = {hash_text("زکات"), hash_text("ZAKAT"), hash_text("شهادت محمد"), hash_text("ولایت"), hash_text("خلافت")}
 
+LAYER3_KEY_B64 = base64.b64encode("امیرالمومنین".encode("utf-8")).decode("utf-8")
+
 def normalize_phone(phone: str) -> str:
     phone = to_english_digits(phone)
     phone = re.sub(r"[^\d+]", "", phone)
@@ -128,85 +135,103 @@ LAYER3_HTML = """<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>پروتکل فدک | لایه سوم</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        fadak: {
+                            bg: '#041114',
+                            card: '#081c21',
+                            border: '#11424a',
+                            emerald: '#00ff9d',
+                            glow: '#2ee59d',
+                            red: '#ff3b4e',
+                            muted: '#81a8b0'
+                        }
+                    },
+                    fontFamily: {
+                        sans: ['Vazirmatn', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            background-color: #F5F2EB;
-            color: #102A43;
-            font-family: 'Segoe UI', Tahoma, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 24px;
+            background-color: #041114;
+            color: #d6f2ee;
+            font-family: 'Vazirmatn', sans-serif;
+            background-image:
+                radial-gradient(circle at 50% 10%, rgba(0, 255, 157, 0.12) 0%, transparent 45%),
+                radial-gradient(circle at 85% 80%, rgba(255, 59, 78, 0.08) 0%, transparent 40%),
+                linear-gradient(rgba(4, 17, 20, 0.96), rgba(4, 17, 20, 0.98));
         }
-        .card {
-            max-width: 580px;
-            width: 100%;
-            border: 2px solid #102A43;
-            background-color: #F5F2EB;
-            padding: 40px 32px;
-            box-shadow: 8px 8px 0px #102A43;
+        .cyber-card {
+            background: rgba(8, 28, 33, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(46, 229, 157, 0.22);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
         }
-        .badge {
-            display: inline-block;
-            background-color: #102A43;
-            color: #F5F2EB;
-            font-size: 0.78rem;
-            letter-spacing: 1px;
-            padding: 6px 12px;
-            margin-bottom: 22px;
-            font-family: monospace;
-        }
-        h1 {
-            font-size: 1.55rem;
-            margin-bottom: 16px;
-            line-height: 1.5;
-        }
-        p {
-            font-size: 1rem;
-            line-height: 1.9;
-            opacity: 0.9;
-        }
-        .divider {
-            height: 1px;
-            background-color: #102A43;
-            opacity: 0.2;
-            margin: 28px 0 20px 0;
-        }
-        .footer {
-            font-size: 0.8rem;
-            opacity: 0.7;
-            display: flex;
-            justify-content: space-between;
-            font-family: monospace;
+        .laser-accent {
+            position: fixed;
+            height: 1.5px;
+            background: linear-gradient(90deg, transparent, #ff3b4e, transparent);
+            box-shadow: 0 0 8px #ff3b4e;
+            transform: rotate(-30deg);
+            pointer-events: none;
         }
     </style>
 </head>
-<body>
-    <div class="card">
-        <div class="badge">ARCHIVE // LAYER 03 // SEALED</div>
-        <h1>تالار ولایت — دسترسی مستقیم مسدود است</h1>
-        <p>
-            آنچه در برابر چشم است، تنها پوسته ای از آرشیو مرکزی است...
-        </p>
-        <div class="divider"></div>
-        <div class="footer">
-            <span>FADAK PROTOCOL</span>
-            <span>403_SEALED</span>
+<body class="min-h-screen flex items-center justify-center p-4 selection:bg-fadak-emerald selection:text-black">
+    <div class="laser-accent w-72 top-20 -left-12 opacity-45"></div>
+    <div class="laser-accent w-96 bottom-24 -right-20 opacity-35"></div>
+
+    <main class="max-w-xl w-full relative z-10">
+        <div class="cyber-card rounded-2xl p-7 sm:p-10 border-r-4 border-r-fadak-red">
+            <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-fadak-bg border border-fadak-border text-xs mb-6">
+                <span class="w-2 h-2 rounded-full bg-fadak-red animate-pulse"></span>
+                <span class="font-bold text-fadak-red tracking-wider font-mono">ARCHIVE // LAYER 03 // 403_SEALED</span>
+            </div>
+
+            <div class="flex items-center gap-3.5 mb-4">
+                <div class="w-12 h-12 rounded-xl border border-fadak-red/40 flex items-center justify-center bg-fadak-bg text-fadak-red shrink-0">
+                    <i class="fa-solid fa-lock text-lg"></i>
+                </div>
+                <h1 class="text-xl sm:text-2xl font-black text-white leading-snug">
+                    تالار ولایت — دسترسی مستقیم مسدود است
+                </h1>
+            </div>
+
+            <p class="text-gray-300 text-sm sm:text-base leading-8 text-justify mb-6">
+                آنچه در برابر چشم است، تنها پوسته ای از آرشیو مرکزی است...
+            </p>
+
+            <div class="border-t border-fadak-border/60 pt-4 flex items-center justify-between text-xs text-fadak-muted font-mono">
+                <span class="flex items-center gap-2">
+                    <i class="fa-solid fa-shield-halved text-fadak-emerald"></i>
+                    FADAK PROTOCOL
+                </span>
+                <span class="text-fadak-glow">403_SEALED</span>
+            </div>
         </div>
-    </div>
+    </main>
 </body>
 </html>"""
 
 LAYER3_SECRET_TEXT = (
-    "جواب همینجاست!\n\n"
+    "جواب همینجاست! (هدرهای پاسخ همین درخواست را بررسی کن)\n\n"
     "اگر خطبه فدکیه را با دقت بخوانیم، میبینیم دعوا هرگز سر یک باغ و چند نخلستان نبود. "
     "فدک فقط بهانه ای بود برای دفاع از چیزی بسیار بزرگ تر: اصل ولایت و اطاعت از ولی خدا. "
     "حضرت زهرا (س) وسط مسجد مدینه، درست پیش از آنکه از حق غصب شده اش حرف بزند، ریشه ماجرا را رو کرد؛ "
     "گفت اطاعت از ما ستون نظم این امت است و امامت ما تنها سپر در برابر تفرقه و فروپاشی. "
     "وقتی مردم ولی حق را تنها بگذارند، دیگر نه از عدالت خبری میماند و نه از سنت پیامبر. "
-    "تمام آن خطبه کوبنده و ایستادگی بی نظیر در برابر سکوت سنگین مدینه، برای این بود که حقانیت و جایگاه امام علی علیه السلام زیر غبار فراموشی و تحریف دفن نشو...د."
+    "تمام آن خطبه کوبنده و ایستادگی بی نظیر در برابر سکوت سنگین مدینه، برای این بود که حقانیت و جایگاه امام علی علیه السلام زیر غبار فراموشی و تحریف دفن نشود."
 )
 
 PRE_LAUNCH_TEXT = (
@@ -259,11 +284,11 @@ STAGE_MESSAGES = {
         "<code>[LAYER 03/05 : تالار ولایت (Web Security)]</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "🔐 <b>گزارش وضعیت:</b>\n"
-        "مهم ترین بخش سند حقیقت در یک درگاه وب محافظت شده مهر و موم شده است..\n\n"
+        "مهم ترین بخش سند حقیقت در یک درگاه وب محافظت شده مهر و موم شده است.\n\n"
         "🛠 <b>ماموریت شما:</b>\n"
         "۱. وارد درگاه وب لایه سوم شوید:\n"
         f"🔗 {get_stage3_url()}\n"
-        "۲.متن را بخوانید. راه نفوذ به آرشیو اصلی را پیدا کنید، قفل سرور را بشکنید و پس از مطالعه متن بازیابی شده، کلید اصلی را همین جا ارسال کنید.\n"
+        "۲. متن را بخوانید. راه نفوذ به آرشیو اصلی را پیدا کنید، قفل سرور را بشکنید و پس از مطالعه متن بازیابی شده، کلید اصلی را استخراج کرده و همین جا ارسال کنید.\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>پاسخ نهایی لایه سوم را همین جا ارسال کنید:</b>"
     ),
@@ -369,11 +394,13 @@ def layer3_api():
             "errors": missing
         }), 403
 
-    return jsonify({
+    resp = make_response(jsonify({
         "status": "unlocked",
         "layer": 3,
         "archive_content": LAYER3_SECRET_TEXT
-    }), 200
+    }), 200)
+    resp.headers["X-Sanctuary-Key"] = LAYER3_KEY_B64
+    return resp
 
 @app.route(f"/webhook/{BOT_TOKEN}", methods=["POST"])
 def telegram_webhook():
@@ -533,7 +560,7 @@ def handle_contact(message):
         process_phone_submission(message, message.contact.phone_number)
 
 def show_leaderboard(chat_id: int):
-    res = supabase.table("users").select("full_name, current_stage, score, finished_at").eq("reg_step", "COMPLETED").order("score", desc=True).limit(10).execute()
+    res = supabase.table("users").select("full_name, current_stage, score, finished_at").eq("reg_step", "COMPLETED").order("score", desc=True).order("finished_at", desc=False).limit(10).execute()
     rows = res.data if res.data else []
     if not rows:
         bot.send_message(chat_id, "هنوز امتیازی ثبت نشده است.")
@@ -648,7 +675,10 @@ def handle_messages(message):
 
     if ans_hash in VALID_STAGE_HASHES.get(stage, set()):
         fails = int(user.get("fail_count") or 0)
-        earned = max(50, (stage * 100) - (fails * 5))
+        base_score = stage * 100
+        elapsed_minutes = max(0, int((now - STAGE_UNLOCK_TS) // 60))
+        time_penalty = min(base_score // 2, elapsed_minutes // 2)
+        earned = max(50, base_score - time_penalty - (fails * 5))
         new_score = int(user.get("score") or 0) + earned
         new_stage = stage + 1
 
@@ -681,7 +711,7 @@ def handle_messages(message):
             bot.send_message(
                 message.chat.id,
                 f"🟢 <b>[ACCESS GRANTED]</b>\n"
-                f"تالار ولایت بازگشایی شد! محور اصلی خطبه فدکیه یعنی حقانیت <b>«امام علی علیه السلام»</b> تثبیت گردید. (+{earned} امتیاز)\n"
+                f"تالار ولایت بازگشایی شد! محور اصلی خطبه فدکیه یعنی حقانیت <b>«امیرالمومنین»</b> تثبیت گردید. (+{earned} امتیاز)\n"
                 "در حال انتقال به لایه چهارم...",
                 parse_mode="HTML"
             )
