@@ -333,7 +333,7 @@ LAYER5_HTML = """<!DOCTYPE html>
                 </h1>
             </div>
             <p class="text-gray-300 text-sm sm:text-base leading-8 text-justify mb-6">
-                لایه ظاهری سیگنال صوتی (final_message.wav) برای به اشتباه انداختن ابزارهای خودکار دستکاری شده است. پارامترهای دقیق استخراج سیگنال واقعی، تنها در پاسخ شبکه همین ایستگاه ثبت شده اند.
+                گاهی صدا ها اشتباه می کنند! از اینجا جوابت رو بگیر!
             </p>
             <div class="border-t border-fadak-border/60 pt-4 flex items-center justify-between text-xs text-fadak-muted font-mono">
                 <span class="flex items-center gap-2">
