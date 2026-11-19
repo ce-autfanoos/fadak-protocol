@@ -87,7 +87,7 @@ VALID_STAGE_HASHES = {
         hash_text("امیرالمومنین"),
         hash_text("امیر المومنین")
     },
-    4: {hash_text("حق"), hash_text("HAQ")},
+    4: {hash_text("حق")},
     5: {hash_text("فدک حق لنا"), hash_text("FADAKHAQLANA")}
 }
 
@@ -292,7 +292,19 @@ STAGE_MESSAGES = {
         "━━━━━━━━━━━━━━━━━━━━\n"
         "⌨️ <b>پاسخ نهایی لایه سوم را همین جا ارسال کنید:</b>"
     ),
-    4: "🔥 <b>[LAYER 04/05 : شبیه سازی واکنش]</b>\nهشدار حرارتی اتاق سرور فعال شد...",
+    4: (
+        "🔥 <b>[SYSTEM ALERT: THERMAL OVERLOAD IN ARCHIVE CORE]</b>\n"
+        "<code>[LAYER 04/05 : شبیه سازی واکنش (Reverse Engineering)]</code>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🚨 <b>گزارش وضعیت:</b>\n"
+        "پس از بازگشایی تالار ولایت، بدافزار «انکار» برای نابود کردن لایه چهارم، سیستم خنک کننده هسته آرشیو را از کار انداخته و فایل شبیه ساز آن (<code>reactor_sim.py</code>) را قفل کرده است.\n\n"
+        "🛠 <b>ماموریت فنی شما:</b>\n"
+        "۱. فایل پایتون <code>reactor_sim.py</code> را دانلود و کد آن را تحلیل کنید.\n"
+        "۲. سه پارامتر کالیبراسیون هسته را از طریق تحلیل منطق کد و مراجعه به <b>سند حقیقت (Fadak_Guide.pdf)</b> به دست آورید.\n"
+        "۳. اسکریپت را اجرا کرده و پارامترها را وارد کنید تا سند لایه چهارم رمزگشایی شود، سپس کلید نهایی را <b>فقط به فارسی</b> همین جا ارسال کنید.\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "⌨️ <b>پاسخ نهایی لایه چهارم را همین جا ارسال کنید:</b>"
+    ),
     5: "🎙 <b>[LAYER 05/05 : بازسازی نهایی]</b>\nسیگنال صوتی نهایی دریافت شد..."
 }
 
@@ -676,8 +688,11 @@ def handle_messages(message):
     if ans_hash in VALID_STAGE_HASHES.get(stage, set()):
         fails = int(user.get("fail_count") or 0)
         base_score = stage * 100
-        elapsed_minutes = max(0, int((now - STAGE_UNLOCK_TS) // 60))
-        time_penalty = min(base_score // 2, elapsed_minutes // 2)
+        if stage < MAX_UNLOCKED_STAGE:
+            time_penalty = base_score // 2
+        else:
+            elapsed_minutes = max(0, int((now - STAGE_UNLOCK_TS) // 60))
+            time_penalty = min(base_score // 2, elapsed_minutes // 2)
         earned = max(50, base_score - time_penalty - (fails * 5))
         new_score = int(user.get("score") or 0) + earned
         new_stage = stage + 1
@@ -713,6 +728,14 @@ def handle_messages(message):
                 f"🟢 <b>[ACCESS GRANTED]</b>\n"
                 f"تالار ولایت بازگشایی شد! محور اصلی خطبه فدکیه یعنی حقانیت <b>«امیرالمومنین»</b> تثبیت گردید. (+{earned} امتیاز)\n"
                 "در حال انتقال به لایه چهارم...",
+                parse_mode="HTML"
+            )
+        elif stage == 4:
+            bot.send_message(
+                message.chat.id,
+                f"🟢 <b>[ACCESS GRANTED]</b>\n"
+                f"هسته آرشیو پایدار شد و کلید <b>«حق»</b> تثبیت گردید! (+{earned} امتیاز)\n"
+                "در حال آماده سازی برای لایه نهایی (لایه پنجم)...",
                 parse_mode="HTML"
             )
         else:
